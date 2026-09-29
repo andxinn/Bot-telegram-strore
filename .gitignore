@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Wrangler / Cloudflare
+.wrangler/
+
+# Dev vars (jangan commit!)
+.dev.vars
+.dev.vars.local
+
+# Dev KV storage
+dev-db.json
+dev-db.backup.*.json
+snapshots/
+
+# Backup local
+backup/
+
+# VSCode local overrides
+.vscode/*.local.json
+
+# Misc
+*.log
+.DS_Store

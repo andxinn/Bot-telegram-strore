@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "cloudflare.vscode-cloudflare-workers",
+    "dbaeumer.vscode-eslint",
+    "christian-kohler.path-intellisense",
+    "eamodio.gitlens"
+  ]
+}

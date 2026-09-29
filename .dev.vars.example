@@ -1,0 +1,56 @@
+# ====================================================================
+# TEMPLATE .dev.vars  —  copy jadi .dev.vars, lalu isi nilai kamu.
+# JANGAN commit file .dev.vars ke git!
+# ====================================================================
+
+# --- Telegram Bot ---
+# WAJIB. Ambil dari @BotFather. Sangat disarankan buat BOT TERPISAH untuk dev.
+BOT_TOKEN=isi-token-bot-dev-di-sini
+
+# ID Telegram numerik owner (bisa cek di @userinfobot)
+OWNER_ID=6242090623
+OWNER_USERNAME=@usernameanda
+
+# Set 'true' kalau token di atas adalah token PRODUCTION
+# (dev-server akan tampilkan warning besar saat startup)
+IS_PROD_TOKEN=false
+
+# --- Identitas Bot ---
+STORE_NAME=DEV STORE
+# Nama bot yang tampil di file txt, ID order, footer.
+# Bisa di-override real-time dari Admin → Settings → Identitas Bot (v9update16+).
+NAMA_BOT=DEV STORE BOT
+CHANNEL_STORE=
+CS=
+
+# --- Mode & simulasi ---
+# development | production  (dev-server override ke 'development' otomatis)
+MODE=development
+
+# 'true' = semua payment langsung sukses (skip Pakasir sama sekali)
+SIMULATE_PAYMENT=false
+SIMULATE_DELAY=5
+
+# --- Logger ---
+# Channel/group ID (numeric, -100...) tempat log invoice/deposit dikirim.
+# Kosongkan kalau tidak perlu.
+INVOICE_LOGGER=
+
+# --- Banner (opsional) ---
+BANNER_FILE_ID=-
+
+# --- Legacy fallback (opsional — sudah tidak dipakai di v9update13+) ---
+DATA_QRIS=
+PAYMENT_SAWERIA=off
+PAYMENT_OKECONNECT=off
+OKE_MERCHANTID=
+OKE_SIGNATURE=
+SAWERIA_USERID=
+
+# ====================================================================
+# CATATAN Pakasir
+# ====================================================================
+# Slug, API Key, mode (sandbox/production), metode, fee — SEMUANYA
+# diatur dari dalam bot:
+#   /admin → ⚙️ Settings → 💳 Setting Payment → Pakasir
+# Tidak perlu env var untuk Pakasir.

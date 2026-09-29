@@ -1,0 +1,13 @@
+name = "telegram-store-bot"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+MODE = "production"
+
+[[kv_namespaces]]
+binding = "DB"
+id = "your-kv-namespace-id"
+
+[triggers]
+crons = ["* * * * *", "0 * * * *"]

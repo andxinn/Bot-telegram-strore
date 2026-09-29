@@ -1,0 +1,101 @@
+import { readJSON } from './kv.js'
+
+let NamaBot = 'Tehtarik Store'
+let StoreName = 'Tehtarik Store'
+let OwnerID = 6242090623
+let OwnerUsername = ''
+let ChannelLog = ''
+let InvoiceLogger = ''
+let ChannelStore = ''
+let CS = ''
+let JamBackup = 6
+let Mode = 'production'
+let SimulatePayment = false
+let SimulateDelay = 30
+let WebhookSecret = ''
+let DevToken = ''
+let BannerFileId = ''
+let DataQris = ''
+let PaymentSaweria = false
+let PaymentOkeConnect = true
+let OkeMerchantId = ''
+let OkeSignature = ''
+let KropaApi = ''
+let KropaApiKey = ''
+let SaweriaUserId = ''
+let bannerStartB64 = ''
+let bannerListB64 = ''
+let orderBotName = ''
+let caraOrderText = ''
+let leaderboardEnabled = true
+let leaderboardBanner = ''
+let channelTicket = ''
+let ButtonMenu = {
+  informasi: 'Information',
+  deposit: 'Deposit',
+  list: 'List Produk',
+  stock: 'Stock'
+}
+
+let channelBackup = ''
+
+async function initConfig(env) {
+  NamaBot = env.NAMA_BOT || 'Tehtarik Store'
+  StoreName = env.STORE_NAME || env.NAMA_BOT || 'Tehtarik Store'
+  OwnerID = parseInt(env.OWNER_ID || '6242090623')
+  OwnerUsername = env.OWNER_USN || ''
+  ChannelLog = env.CHANNEL_LOG || ''
+  InvoiceLogger = env.INVOICE_LOGGER || ''
+  channelBackup = env.CHANNEL_BACKUP || ''
+  ChannelStore = env.CHANNEL_STORE || ''
+  CS = env.CS || ''
+  JamBackup = parseInt(env.JAM_BACKUP || '6')
+  Mode = (env.MODE || 'production').toLowerCase()
+  SimulatePayment = (env.SIMULATE_PAYMENT || 'false').toLowerCase() === 'true'
+  SimulateDelay = parseInt(env.SIMULATE_DELAY || '30')
+  WebhookSecret = env.WEBHOOK_SECRET || ''
+  DevToken = env.DEV_TOKEN || ''
+  BannerFileId = env.BANNER_FILE_ID || env.STIKER_START_FILEID || ''
+  DataQris = env.DATA_QRIS || ''
+  PaymentSaweria = (env.PAYMENT_SAWERIA || 'of').toLowerCase() === 'on'
+  PaymentOkeConnect = !PaymentSaweria
+  OkeMerchantId = env.OKE_MERCHANTID || ''
+  OkeSignature = env.OKE_SIGNATURE || ''
+  KropaApi = env.KROPA_API || ''
+  KropaApiKey = env.KROPA_APIKEY || ''
+  SaweriaUserId = env.SAWERIA_USERID || ''
+  try {
+    const kvConfig = await readJSON(env, 'BotConfig', null)
+    if (kvConfig) {
+      if (kvConfig.NamaBot) NamaBot = kvConfig.NamaBot
+      if (kvConfig.StoreName) StoreName = kvConfig.StoreName
+      if (kvConfig.OwnerID) OwnerID = kvConfig.OwnerID
+      if (kvConfig.InvoiceLogger !== undefined) InvoiceLogger = kvConfig.InvoiceLogger
+      if (kvConfig.channelBackup !== undefined) channelBackup = kvConfig.channelBackup
+      if (kvConfig.ChannelStore) ChannelStore = kvConfig.ChannelStore
+      if (kvConfig.CS) CS = kvConfig.CS
+      if (kvConfig.DataQris) DataQris = kvConfig.DataQris
+      if (kvConfig.OkeMerchantId) OkeMerchantId = kvConfig.OkeMerchantId
+      if (kvConfig.OkeSignature) OkeSignature = kvConfig.OkeSignature
+      if (kvConfig.BannerFileId) BannerFileId = kvConfig.BannerFileId
+      if (kvConfig.ButtonMenu) ButtonMenu = kvConfig.ButtonMenu
+      if (kvConfig.bannerStartB64 !== undefined) bannerStartB64 = kvConfig.bannerStartB64
+      if (kvConfig.bannerListB64 !== undefined) bannerListB64 = kvConfig.bannerListB64
+      if (kvConfig.orderBotName) orderBotName = kvConfig.orderBotName
+      if (kvConfig.caraOrderText) caraOrderText = kvConfig.caraOrderText
+      if (kvConfig.leaderboardEnabled !== undefined) leaderboardEnabled = kvConfig.leaderboardEnabled
+      if (kvConfig.leaderboardBanner !== undefined) leaderboardBanner = kvConfig.leaderboardBanner
+      if (kvConfig.channelTicket !== undefined) channelTicket = kvConfig.channelTicket
+      if (kvConfig.ChannelLog !== undefined) ChannelLog = kvConfig.ChannelLog
+    }
+  } catch (e) {}
+}
+
+export {
+  NamaBot, StoreName, OwnerID, OwnerUsername, ChannelLog, InvoiceLogger, channelBackup,
+  ChannelStore, CS, JamBackup, Mode, SimulatePayment, SimulateDelay,
+  WebhookSecret, DevToken, BannerFileId, DataQris, PaymentSaweria,
+  bannerStartB64, bannerListB64, orderBotName, caraOrderText,
+  PaymentOkeConnect, OkeMerchantId, OkeSignature, KropaApi, KropaApiKey,
+  SaweriaUserId, ButtonMenu, initConfig, leaderboardEnabled, leaderboardBanner, channelTicket
+}

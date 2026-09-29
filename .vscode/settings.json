@@ -1,0 +1,25 @@
+{
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/node_modules": true,
+    "dev-db.json": true,
+    "dev-db.backup.*.json": true,
+    "snapshots": false,
+    ".wrangler": true
+  },
+  "search.exclude": {
+    "dev-db.json": true,
+    "snapshots": true,
+    ".wrangler": true,
+    "backup": true
+  },
+  "editor.formatOnSave": false,
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "files.eol": "\n",
+  "telemetry.telemetryLevel": "off",
+  "javascript.updateImportsOnFileMove.enabled": "never",
+  "npm.enableRunFromFolder": true,
+  "terminal.integrated.scrollback": 10000
+}

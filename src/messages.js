@@ -475,33 +475,41 @@ function buildProductListView(kategori, page) {
   return { caption: cap, keyboard: { inline_keyboard: rows } }
 }
 
+function shortRp(n) {
+  n = Number(n) || 0
+  if (n >= 1000000) return String(+(n / 1000000).toFixed(1)).replace('.', ',') + 'jt'
+  if (n >= 1000) return Math.round(n / 1000) + 'rb'
+  return String(n)
+}
+
 function buildVariantView(kat, variants, fsMap = {}) {
   // v9update18: fsMap = { [variantId]: { salePrice, originalPrice, discountPercent, expiresAt } }
-  let cap = '╭───〔 ☰ ' + mdSafe(kat.produkName) + ' 〕\n│\n'
-  if (kat.desc) cap += '│ ' + mdSafe(String(kat.desc)) + '\n│\n'
+  // Opsi 3: caption tabel ringkas, tombol bawa harga; stok habis = tombol noop.
+  let cap = '╭───〔 ☰ ' + mdSafe(kat.produkName) + ' 〕\n'
+  if (kat.desc) cap += '│ ' + mdSafe(String(kat.desc)) + '\n'
+  cap += '│ ID │ Varian │ Harga │ Stok │\n'
   variants.forEach(v => {
     const st = v.stok ? v.stok.length : 0
     const fs = fsMap[String(v.id)]
-    if (fs) {
-      cap += '│ ' + v.id + ' ✧ *Varian* → ' + mdSafe(v.nameproduct) + '  ← FLASH SALE\n'
-      cap += '│ ├ *Harga*  → ~Rp ' + (v.price || 0).toLocaleString('id-ID') + '~ → ✧ Rp ' + Number(fs.salePrice).toLocaleString('id-ID') + ' (-' + (fs.discountPercent || 0) + '%)\n'
-      cap += '│ └ *Stok*   → ' + (st === 0 ? 'HABIS ✕' : st + ' tersedia ✓') + '\n│\n'
-    } else {
-      cap += '│ ' + v.id + ' *Varian* → ' + mdSafe(v.nameproduct) + '\n'
-      cap += '│ ├ *Harga*  → Rp ' + (v.price || 0).toLocaleString('id-ID') + '\n'
-      cap += '│ └ *Stok*   → ' + (st === 0 ? 'HABIS ✕' : st + ' tersedia ✓') + '\n│\n'
-    }
+    const priceTxt = fs
+      ? '~' + (v.price || 0).toLocaleString('id-ID') + '~ ' + Number(fs.salePrice).toLocaleString('id-ID')
+      : (v.price || 0).toLocaleString('id-ID')
+    const stockTxt = st === 0 ? 'Habis' : st + ' ✓'
+    cap += '│ ' + v.id + ' │ ' + mdSafe(v.nameproduct) + ' │ ' + priceTxt + ' │ ' + stockTxt + ' │\n'
   })
-  cap += '╰───────────────────────\nPilih varian di bawah '
+  cap += '╰───────────────────────\nPilih varian di bawah 👇'
   const rows = []
-  let row = []
   for (const v of variants) {
+    const st = v.stok ? v.stok.length : 0
     const fs = fsMap[String(v.id)]
     const prefix = fs ? '✧ ' : ''
-    row.push({ text: prefix + '[' + v.id + '] ' + v.nameproduct + ((v.stok ? v.stok.length : 0) === 0 ? ' · Habis' : ''), callback_data: 'dpi_' + v.id })
-    if (row.length === 2) { rows.push(row); row = [] }
+    if (st === 0) {
+      rows.push([{ text: prefix + '[' + v.id + '] ' + v.nameproduct + ' · Habis', callback_data: 'noop' }])
+    } else {
+      const price = fs ? fs.salePrice : (v.price || 0)
+      rows.push([{ text: prefix + '[' + v.id + '] ' + v.nameproduct + ' · Rp' + shortRp(price), callback_data: 'dpi_' + v.id }])
+    }
   }
-  if (row.length) rows.push(row)
   rows.push([{ text: '🔙 Kembali', callback_data: 'back_to_list' }])
   return { caption: cap, keyboard: { inline_keyboard: rows } }
 }

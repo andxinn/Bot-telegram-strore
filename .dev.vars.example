@@ -1,66 +1,90 @@
 # ====================================================================
-# TEMPLATE .dev.vars  —  copy jadi .dev.vars, lalu isi nilai kamu.
-# JANGAN commit file .dev.vars ke git!
+# TEMPLATE .dev.vars — copy jadi .dev.vars, lalu isi nilai kamu.
+#   cp .dev.vars.example .dev.vars
+# JANGAN commit .dev.vars ke git! (sudah di .gitignore)
+# Legenda tiap baris: [WAJIB] bot tidak jalan tanpa ini
+#   [OPSIONAL] boleh kosong | [VIA BOT] jangan isi di sini, isi via panel admin
 # ====================================================================
 
-# --- Telegram Bot ---
-# WAJIB. Ambil dari @BotFather. Sangat disarankan buat BOT TERPISAH untuk dev.
+# --- 1. WAJIB: Telegram ---
+# Ambil token dari @BotFather. Buat BOT TERPISAH untuk dev, jangan pakai token production.
+# [WAJIB]
 BOT_TOKEN=isi-token-bot-dev-di-sini
 
-# ID Telegram numerik owner (bisa cek di @userinfobot)
+# ID Telegram numerik owner. Cek via @userinfobot (bukan username, harus angka).
+# [WAJIB]
 OWNER_ID=6242090623
-OWNER_USERNAME=@usernameanda
 
-# Set 'true' kalau token di atas adalah token PRODUCTION
-# (dev-server akan tampilkan warning besar saat startup)
+# Username owner TANPA @ (contoh: andxinn). Dipakai untuk link "chat owner".
+# [OPSIONAL]
+OWNER_USN=
+
+# Set 'true' kalau token di atas adalah token PRODUCTION.
+# Dev-server tampilkan warning besar saat startup agar tidak salah kirim ke bot live.
+# [OPSIONAL]
 IS_PROD_TOKEN=false
 
-# --- Identitas Bot ---
-STORE_NAME=DEV STORE
-# Nama bot yang tampil di file txt, ID order, footer.
-# Bisa di-override real-time dari Admin → Settings → Identitas Bot (v9update16+).
+# --- 2. Identitas toko (bisa diubah kapan saja via panel bot) ---
+# Admin → Sistem → Identitas & Info. Nilai di sini = default awal.
+# [OPSIONAL]
 NAMA_BOT=DEV STORE BOT
-CHANNEL_STORE=
+STORE_NAME=DEV STORE
+# Username CS TANPA @, tampil di pesan bantuan. Kosongkan bila belum ada.
+# [OPSIONAL]
 CS=
+# Link/username channel katalog (contoh: @katalogkamu). Kosongkan bila belum ada.
+# [OPSIONAL]
+CHANNEL_STORE=
 
-# --- Mode & simulasi ---
-# development | production  (dev-server override ke 'development' otomatis)
-MODE=development
+# --- 3. Channel & log (isi setelah bikin channel/grup, format -100...) ---
+# Log semua transaksi sukses/gagal. Admin → Sistem → Channel & Log.
+# [OPSIONAL]
+CHANNEL_LOG=
+INVOICE_LOGGER=
+# Tempat file backup DB otomatis dikirim.
+# [OPSIONAL]
+CHANNEL_BACKUP=
+# Jam backup otomatis harian (WIB, 0-23).
+# [OPSIONAL]
+JAM_BACKUP=6
 
-# --- Database backend ---
-# auto = ikut setting bot (Admin → Settings → Kelola Database)
+# --- 4. Database ---
+# auto = ikut setting bot (Admin → Sistem → Kelola Database)
 # kv = paksa lokal (dev-db.json) | turso = paksa Turso
+# [OPSIONAL]
 DB_MODE=auto
 
-# Opsional: kredensial Turso via env (menang atas setting bot).
-# Cara utama tetap via bot: Admin → Settings → Kelola Database → Set URL/Token.
+# Kredensial Turso via env (menang atas setting bot). Cara utama tetap via panel bot.
+# Format URL: libsql://namadb-xxx.turso.io (dari dashboard turso.tech → database → Connect)
+# [OPSIONAL]
 #TURSO_URL=libsql://xxx.turso.io
 #TURSO_TOKEN=
 
-# 'true' = semua payment langsung sukses (skip Pakasir sama sekali)
+# --- 5. Mode & simulasi (dev saja) ---
+# development | production (dev-server otomatis pakai 'development')
+# [OPSIONAL]
+MODE=development
+# 'true' = semua payment langsung sukses (skip gateway). Untuk uji alur tanpa bayar.
+# [OPSIONAL]
 SIMULATE_PAYMENT=false
 SIMULATE_DELAY=5
+# Auth endpoint /dev/* (min 8 karakter acak). Kosongkan = endpoint dev terbuka di localhost.
+# [OPSIONAL]
+#DEV_TOKEN=
+# Rahasia webhook Telegram production. Dev tidak perlu.
+# [OPSIONAL]
+#WEBHOOK_SECRET=
 
-# --- Logger ---
-# Channel/group ID (numeric, -100...) tempat log invoice/deposit dikirim.
-# Kosongkan kalau tidak perlu.
-INVOICE_LOGGER=
-
-# --- Banner (opsional) ---
+# --- 6. Banner (opsional, bisa via panel bot: Sistem → Media & Banner) ---
+# File ID foto Telegram untuk banner. '-' = tanpa banner.
+# [OPSIONAL]
 BANNER_FILE_ID=-
 
-# --- Legacy fallback (opsional — sudah tidak dipakai di v9update13+) ---
-DATA_QRIS=
-PAYMENT_SAWERIA=off
-PAYMENT_OKECONNECT=off
-OKE_MERCHANTID=
-OKE_SIGNATURE=
-SAWERIA_USERID=
-
 # ====================================================================
-# CATATAN Pakasir
+# JANGAN ISI — VIA PANEL BOT (Admin → Pembayaran / Sistem)
 # ====================================================================
-# Slug, API Key, mode (sandbox/production), metode, fee — SEMUANYA
-# diatur dari dalam bot:
-#   /admin → ⚙️ Settings → 💳 Setting Payment → Pakasir
-# Tidak perlu env var untuk Pakasir.
+# Payment (Pakasir/Duitku/Saweria): slug, API key, mode, metode, fee
+#   → Admin → Pembayaran → pilih gateway
+# Kredensial Turso (cara utama): URL + token
+#   → Admin → Sistem → Kelola Database
+# DATA_QRIS / QR_STRING: legacy, tidak dipakai lagi (v9update13+).

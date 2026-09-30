@@ -1,4 +1,4 @@
-import { NamaBot, StoreName, OwnerID, InvoiceLogger, BannerFileId, SimulatePayment, SimulateDelay, PaymentSaweria, orderBotName } from './config.js'
+import { NamaBot, StoreName, OwnerID, InvoiceLogger, BannerFileId, SimulatePayment, SimulateDelay, orderBotName } from './config.js'
 import { readJSON, writeJSON, deleteKey, readText, writeText, existsKey } from './kv.js'
 import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgEditMessageText, tgEditMessageMedia, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendDocumentFile, tgSendSticker, tgCloseForumTopic, tgDeleteForumTopic } from './telegram.js'
 import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam, generateTrxId, generateOrderId, expiredTime, parseExpiredWIB } from './helpers.js'
@@ -7,7 +7,6 @@ import { getManagePanel, getMainMenuKeyboard } from './keyboard.js'
 import { generateQris } from './qris.js'
 import { getActiveGateway, pakasirConfigured, calcFee, feeLabel, methodLabel, pakasirCreate, pakasirCancel, pakasirDetail, pakasirSimulate, qrImageUrl } from './pakasir.js'
 import { duitkuConfigured, duitkuCreateQris, providerLabel, qrImageUrl as dkQrImageUrl } from './duitku.js'
-import { checkMutasiQRIS, matchPayment, createSaweria } from './payment.js'
 import { handleAdminCallback } from './admin.js'
 
 async function editCard(env, cq, caption, keyboard, parseMode = 'Markdown') {
@@ -536,10 +535,10 @@ async function handleCallbackQuery(env, cq) {
       await writeJSON(env, 'orderState_' + fromId, orderState)
       const { buildPaymentView } = await import('./messages.js')
       const agC = await getActiveGateway(env)
-      const { orkutConfigured } = await import('./orkut.js')
+      const { saweriaConfigured } = await import('./saweria.js')
       let payInfoC
-      if (agC.name === 'orkut') {
-        payInfoC = { enabled: orkutConfigured(agC.gw), label: 'Bayar via QRIS' }
+      if (agC.name === 'saweria') {
+        payInfoC = { enabled: saweriaConfigured(agC.gw), label: 'Bayar via QRIS' }
       } else if (agC.name === 'duitku') {
         payInfoC = { enabled: duitkuConfigured(agC.gw), label: 'Bayar via QRIS' }
       } else {
@@ -698,85 +697,69 @@ async function handleCallbackQuery(env, cq) {
       const trxId2 = generateOrderId(botNm2)
       const agQ = await getActiveGateway(env)
       const gwQ = agQ.gw
-      // ─── Orkut branch (QRIS-only Private Gateway) ───
-      if (agQ.name === 'orkut') {
-        const { orkutConfigured, orkutCreateQris } = await import('./orkut.js')
-        if (!orkutConfigured(gwQ)) {
+      // ─── Saweria branch (QRIS-only) ───
+      if (agQ.name === 'saweria') {
+        const { saweriaConfigured, saweriaCreate, saweriaSession } = await import('./saweria.js')
+        if (!saweriaConfigured(gwQ)) {
           await releaseLock(env, qrisLock)
-          await tgSendMessage(env, chatId, '⚠️ Payment gateway (Orkut) belum aktif. Silakan bayar via Saldo atau hubungi admin.', getMainMenuKeyboard())
+          await tgSendMessage(env, chatId, '⚠️ Payment gateway (Saweria) belum aktif. Silakan bayar via Saldo atau hubungi admin.', getMainMenuKeyboard())
           return
         }
-        const merchantFeeOk = calcFee(gwQ, tot2)
-        const chargeAmtOk = tot2 + merchantFeeOk
-        const createdOk = await orkutCreateQris(gwQ, trxId2, chargeAmtOk, gwQ.expiryPeriod || 10)
-        if (!createdOk.ok) {
+        const merchantFeeSw = calcFee(gwQ, tot2)
+        const chargeAmtSw = tot2 + merchantFeeSw
+        const createdSw = await saweriaCreate(gwQ, trxId2, chargeAmtSw, {
+          customerName: fromName || 'Customer',
+          email: (fromUsername ? fromUsername : ('u' + fromId)) + '@bot.local'
+        })
+        if (!createdSw.ok) {
           await releaseLock(env, qrisLock)
-          await tgSendMessage(env, chatId, '❌ Gagal membuat transaksi Orkut: ' + (createdOk.error || 'coba lagi'), getMainMenuKeyboard())
+          await tgSendMessage(env, chatId, '❌ Gagal membuat transaksi Saweria: ' + (createdSw.error || 'coba lagi'), getMainMenuKeyboard())
           return
         }
-        const finalTotalOk = Number(createdOk.totalBayar || chargeAmtOk)
-        const orkutUnique = Math.max(0, finalTotalOk - chargeAmtOk)
-        const orkutExpMin = Number(gwQ.expiryPeriod || 10)
+        const swExpMin = Number(gwQ.expiryPeriod) || 10
 
-        os2.jumlahPesanan = jml2; os2.totalPrice = tot2; os2.payment_method = 'Orkut:QRIS'; os2.userId = fromId; os2.trxId = trxId2
+        os2.jumlahPesanan = jml2; os2.totalPrice = tot2; os2.payment_method = 'Saweria:QRIS'; os2.userId = fromId; os2.trxId = trxId2
         await writeJSON(env, 'orderState_' + fromId, os2)
-        let qMsgOk = '╭───〔 💳 QRIS 〕───\n'
-        qMsgOk += '┊ *ID Pesanan  :* `' + trxId2 + '`\n'
-        qMsgOk += '┊ *Produk      :* ' + mdSafe(os2.varian) + '\n'
-        qMsgOk += '┊ *Jumlah      :* x' + jml2 + '\n'
-        qMsgOk += '┊ *Harga       :* Rp' + tot2.toLocaleString('id-ID') + '\n'
-        if (merchantFeeOk > 0) qMsgOk += '┊ *Fee (' + feeLabel(gwQ) + ') :* Rp' + merchantFeeOk.toLocaleString('id-ID') + '\n'
-        if (orkutUnique > 0) qMsgOk += '┊ *Kode Unik   :* Rp' + orkutUnique.toLocaleString('id-ID') + '\n'
-        qMsgOk += '┊ *Total Bayar :* Rp' + finalTotalOk.toLocaleString('id-ID') + '\n'
-        qMsgOk += '┊ *Reference   :* `' + (createdOk.reference || '-') + '`\n'
-        qMsgOk += '╰──────────────────\n\n'
-        qMsgOk += '⏰ Kadaluarsa dalam *' + orkutExpMin + ' menit*\n'
-        qMsgOk += '📲 Scan QR di bawah untuk membayar'
-        const pkRowsOk = [[{ text: '↻ Cek Pembayaran', callback_data: 'cekbayar_' + trxId2, style: 'success' }]]
-        pkRowsOk.push([{ text: '❌ Batal', callback_data: 'batal_qris_' + trxId2, style: 'danger' }])
-        const qkbOk = { inline_keyboard: pkRowsOk }
-        let qMsgKeyOk = null
-        const qrImgOk = createdOk.qrString
-          ? ('https://quickchart.io/qr?text=' + encodeURIComponent(createdOk.qrString) + '&size=400')
-          : createdOk.qrLink
-        if (qrImgOk) {
-          let qEditedOk = false
-          if (cq.message && cq.message.photo) {
-            try {
-              const qEdOk = await tgEditMessageMedia(env, chatId, messageId, qrImgOk, qMsgOk, qkbOk)
-              if (qEdOk && qEdOk.ok) { qMsgKeyOk = messageId; qEditedOk = true }
-            } catch (e) {}
-          }
-          if (!qEditedOk) {
-            try { await tgDeleteMessage(env, chatId, messageId) } catch (e) {}
-            const sentQOk = await tgSendPhotoUrl(env, chatId, qrImgOk, qMsgOk, qkbOk)
-            qMsgKeyOk = (sentQOk && sentQOk.result && sentQOk.result.message_id) ? sentQOk.result.message_id : null
-          }
-        } else {
-          const sentTOk = await tgSendMessage(env, chatId, qMsgOk, qkbOk, 'Markdown')
-          qMsgKeyOk = (sentTOk && sentTOk.result && sentTOk.result.message_id) ? sentTOk.result.message_id : null
+        let qMsgSw = '╭───〔 💳 SAWERIA QRIS 〕───\n'
+        qMsgSw += '┊ *ID Pesanan  :* `' + trxId2 + '`\n'
+        qMsgSw += '┊ *Produk      :* ' + mdSafe(os2.varian) + '\n'
+        qMsgSw += '┊ *Jumlah      :* x' + jml2 + '\n'
+        qMsgSw += '┊ *Harga       :* Rp' + tot2.toLocaleString('id-ID') + '\n'
+        if (merchantFeeSw > 0) qMsgSw += '┊ *Fee (' + feeLabel(gwQ) + ') :* Rp' + merchantFeeSw.toLocaleString('id-ID') + '\n'
+        qMsgSw += '┊ *Total Bayar :* Rp' + chargeAmtSw.toLocaleString('id-ID') + '\n'
+        qMsgSw += '┊ *Reference   :* `' + (createdSw.id || '-') + '`\n'
+        qMsgSw += '╰──────────────────\n\n'
+        qMsgSw += '⏰ Kadaluarsa dalam *' + swExpMin + ' menit*\n'
+        qMsgSw += '📲 Scan QR di bawah untuk membayar'
+        const pkRowsSw = [[{ text: '↻ Cek Pembayaran', callback_data: 'cekbayar_' + trxId2, style: 'success' }]]
+        pkRowsSw.push([{ text: '❌ Batal', callback_data: 'batal_qris_' + trxId2, style: 'danger' }])
+        const qkbSw = { inline_keyboard: pkRowsSw }
+        let qMsgKeySw = null
+        const qrImgSw = 'https://quickchart.io/qr?text=' + encodeURIComponent(createdSw.qrString) + '&size=400'
+        if (cq.message && cq.message.photo) {
+          try {
+            const qEdSw = await tgEditMessageMedia(env, chatId, messageId, qrImgSw, qMsgSw, qkbSw)
+            if (qEdSw && qEdSw.ok) { qMsgKeySw = messageId }
+          } catch (e) {}
         }
-        const sessionsOk = await readJSON(env, 'SessionDeposit', [])
-        sessionsOk.push({
-          id: trxId2,
-          status: 'pending',
-          depositDetails: {
-            userId: fromId, type: 'purchase', id: Number(pqProductId),
-            cart: jml2, produk: os2.produk, produk_nama: os2.varian,
-            total_amount: finalTotalOk, expired: expiredTime(orkutExpMin), key: qMsgKeyOk,
-            nama: fromName, username: fromUsername,
-            provider: 'orkut', orkut_amount: finalTotalOk,
-            orkut_reference: createdOk.reference, orkut_qr: createdOk.qrString, orkut_qrLink: createdOk.qrLink,
-            orkut_ref: createdOk.reference,
-            orkut_gw: { baseUrl: gwQ.baseUrl, apiKey: gwQ.apiKey, expiryPeriod: gwQ.expiryPeriod },
-            expiryMinutes: orkutExpMin,
-            display_total: finalTotalOk,
+        if (qMsgKeySw === null) {
+          try { await tgDeleteMessage(env, chatId, messageId) } catch (e) {}
+          const sentQSw = await tgSendPhotoUrl(env, chatId, qrImgSw, qMsgSw, qkbSw)
+          qMsgKeySw = (sentQSw && sentQSw.result && sentQSw.result.message_id) ? sentQSw.result.message_id : null
+        }
+        const sessionsSw = await readJSON(env, 'SessionDeposit', [])
+        sessionsSw.push(saweriaSession({
+          trxId: trxId2, userId: fromId, type: 'purchase', amount: tot2, charge: chargeAmtSw,
+          gw: gwQ, nama: fromName, username: fromUsername,
+          extra: {
+            id: Number(pqProductId), cart: jml2, produk: os2.produk, produk_nama: os2.varian,
+            saweria_id: createdSw.id,
             flashSaleId: os2.flashSaleId || null,
             flashSaleExpiresAt: os2.flashSaleExpiresAt || null,
             originalPrice: os2.originalPrice || null
           }
-        })
-        await writeJSON(env, 'SessionDeposit', sessionsOk)
+        }))
+        await writeJSON(env, 'SessionDeposit', sessionsSw)
         await releaseLock(env, qrisLock)
         return
       }
@@ -957,9 +940,8 @@ async function handleCallbackQuery(env, cq) {
       const d = qCancelSes.depositDetails
       if (d.provider === 'pakasir' && d.pakasir_gw) {
         try { await pakasirCancel(d.pakasir_gw, qTrxId, d.pakasir_amount) } catch (e) {}
-      } else if (d.provider === 'orkut' && d.orkut_gw && d.orkut_ref) {
-        try { const { orkutCancel } = await import('./orkut.js'); await orkutCancel(d.orkut_gw, d.orkut_ref) } catch (e) {}
       }
+      // saweria: tidak ada API cancel — session expired di cron, donasi pending expired sendiri
       const { sendTxLog } = await import('./messages.js')
       await sendTxLog(env, {
         type: 'failed',
@@ -1047,16 +1029,16 @@ async function handleCallbackQuery(env, cq) {
         return
       }
       let ckOk = false
-      // ─── Orkut branch: cek via status ───
-      if (ckDetails.provider === 'orkut' && ckDetails.orkut_gw) {
-        const { orkutStatus } = await import('./orkut.js')
-        const stat = await orkutStatus(ckDetails.orkut_gw, ckDetails.orkut_ref)
+      // ─── Saweria branch: cek via status ───
+      if (ckDetails.provider === 'saweria' && ckDetails.saweria_id) {
+        const { saweriaStatus } = await import('./saweria.js')
+        const stat = await saweriaStatus(null, ckDetails.saweria_id)
         if (stat && stat.ok && stat.status === 'PAID') {
           await writeJSON(env, 'SessionDeposit', ckSessions.filter(s => s.id !== ckTrxId))
           const { processPaymentSuccess } = await import('./payments.js')
           await processPaymentSuccess(env, ckSession, {
-            status: 'completed', reference: ckDetails.orkut_ref,
-            amount: Number(ckDetails.total_amount), gateway: 'orkut'
+            status: 'completed', reference: ckDetails.saweria_id,
+            amount: Number(ckDetails.total_amount), gateway: 'saweria'
           })
           ckOk = true
         }
@@ -1145,9 +1127,8 @@ async function handleCallbackQuery(env, cq) {
         const d = session.depositDetails
         if (d.provider === 'pakasir' && d.pakasir_gw) {
           try { await pakasirCancel(d.pakasir_gw, trxId, d.pakasir_amount) } catch (e) {}
-        } else if (d.provider === 'orkut' && d.orkut_gw && d.orkut_ref) {
-          try { const { orkutCancel } = await import('./orkut.js'); await orkutCancel(d.orkut_gw, d.orkut_ref) } catch (e) {}
         }
+        // saweria: tidak ada API cancel — biarkan expired
       }
       await writeJSON(env, 'SessionDeposit', sessions.filter(s => s.id !== trxId))
       await tgDeleteMessage(env, chatId, messageId)

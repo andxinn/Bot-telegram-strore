@@ -1626,42 +1626,40 @@ export async function handleAdminState(env, msg, state) {
     await deleteKey(env, 'adminState_' + fromId)
     await tgSendMessage(env, chatId, '✅ Expiry Duitku: *' + v + ' menit*', adminMainPanel(), 'Markdown'); return
   }
-  if (state.action === 'pay_ok_baseurl') {
-    let urlStr = (text||'').trim()
-    if (!urlStr.startsWith('http://') && !urlStr.startsWith('https://')) {
-      await tgSendMessage(env, chatId, '⚠️ Base URL harus dimulai dengan http:// atau https://.'); return
-    }
-    const pay = await getPayCfg(env); pay.gateways.orkut.baseUrl = urlStr; await savePayCfg(env, pay)
+  if (state.action === 'pay_sw_username') {
+    const u = (text||'').trim().replace(/^@/, '')
+    if (!u || u.length < 2) { await tgSendMessage(env, chatId, '⚠️ Username tidak valid.'); return }
+    const pay = await getPayCfg(env); pay.gateways.saweria.username = u; await savePayCfg(env, pay)
     await deleteKey(env, 'adminState_' + fromId)
-    await tgSendMessage(env, chatId, '✅ Base URL Orkut disimpan: *' + urlStr + '*', adminMainPanel(), 'Markdown'); return
+    await tgSendMessage(env, chatId, '✅ Username Saweria disimpan: *' + u + '*', adminMainPanel(), 'Markdown'); return
   }
-  if (state.action === 'pay_ok_apikey') {
-    const key = (text||'').trim()
-    if (!key || key.length < 3) { await tgSendMessage(env, chatId, '⚠️ API Key terlalu pendek.'); return }
-    const pay = await getPayCfg(env); pay.gateways.orkut.apiKey = key; await savePayCfg(env, pay)
+  if (state.action === 'pay_sw_userid') {
+    const uid = (text||'').trim()
+    if (!uid || uid.length < 8) { await tgSendMessage(env, chatId, '⚠️ User ID tidak valid (harus UUID).'); return }
+    const pay = await getPayCfg(env); pay.gateways.saweria.userId = uid; await savePayCfg(env, pay)
     await deleteKey(env, 'adminState_' + fromId)
-    await tgSendMessage(env, chatId, '✅ API Key Orkut disimpan (tersembunyi).', adminMainPanel(), 'Markdown'); return
+    await tgSendMessage(env, chatId, '✅ User ID Saweria disimpan: *' + uid.slice(0,8) + '…*', adminMainPanel(), 'Markdown'); return
   }
-  if (state.action === 'pay_ok_expiry') {
+  if (state.action === 'pay_sw_expiry') {
     const v = parseInt((text||'').trim().replace(/[^0-9]/g, ''))
     if (isNaN(v) || v < 1) { await tgSendMessage(env, chatId, '⚠️ Masukkan angka menit (minimal 1).'); return }
-    const pay = await getPayCfg(env); pay.gateways.orkut.expiryPeriod = v; await savePayCfg(env, pay)
+    const pay = await getPayCfg(env); pay.gateways.saweria.expiryPeriod = v; await savePayCfg(env, pay)
     await deleteKey(env, 'adminState_' + fromId)
-    await tgSendMessage(env, chatId, '✅ Expiry Orkut: *' + v + ' menit*', adminMainPanel(), 'Markdown'); return
+    await tgSendMessage(env, chatId, '✅ Expiry Saweria: *' + v + ' menit*', adminMainPanel(), 'Markdown'); return
   }
-  if (state.action === 'pay_ok_feepct') {
+  if (state.action === 'pay_sw_feepct') {
     const v = parseFloat((text||'').trim().replace(',', '.'))
     if (isNaN(v) || v < 0 || v > 100) { await tgSendMessage(env, chatId, '⚠️ Masukkan angka 0–100.'); return }
-    const pay = await getPayCfg(env); pay.gateways.orkut.feePercent = v; await savePayCfg(env, pay)
+    const pay = await getPayCfg(env); pay.gateways.saweria.feePercent = v; await savePayCfg(env, pay)
     await deleteKey(env, 'adminState_' + fromId)
-    await tgSendMessage(env, chatId, '✅ Fee persen Orkut: *' + v + '%*', adminMainPanel(), 'Markdown'); return
+    await tgSendMessage(env, chatId, '✅ Fee persen Saweria: *' + v + '%*', adminMainPanel(), 'Markdown'); return
   }
-  if (state.action === 'pay_ok_feenom') {
+  if (state.action === 'pay_sw_feenom') {
     const v = parseInt((text||'').trim().replace(/[^0-9]/g, ''))
     if (isNaN(v) || v < 0) { await tgSendMessage(env, chatId, '⚠️ Masukkan nominal Rupiah (angka).'); return }
-    const pay = await getPayCfg(env); pay.gateways.orkut.feeNominal = v; await savePayCfg(env, pay)
+    const pay = await getPayCfg(env); pay.gateways.saweria.feeNominal = v; await savePayCfg(env, pay)
     await deleteKey(env, 'adminState_' + fromId)
-    await tgSendMessage(env, chatId, '✅ Fee nominal Orkut: *Rp' + v.toLocaleString('id-ID') + '*', adminMainPanel(), 'Markdown'); return
+    await tgSendMessage(env, chatId, '✅ Fee nominal Saweria: *Rp' + v.toLocaleString('id-ID') + '*', adminMainPanel(), 'Markdown'); return
   }
   // fallback
   await tgSendMessage(env, chatId, 'Ketik /batal untuk membatalkan.')
@@ -3164,16 +3162,16 @@ export async function handleAdminCallback(env, cq) {
     const pay = await getPayCfg(env)
     const gwPk = pay.gateways.pakasir
     const gwDk = pay.gateways.duitku
-    const gwOk = pay.gateways.orkut
+    const gwSw = pay.gateways.saweria
     const onPk = gwPk.enabled ? '🟢' : '⚪'
     const onDk = gwDk.enabled ? '🟢' : '⚪'
-    const onOk = gwOk.enabled ? '🟢' : '⚪'
+    const onSw = gwSw.enabled ? '🟢' : '⚪'
     const actPk = (pay.active === 'pakasir') ? ' ⭐' : ''
     const actDk = (pay.active === 'duitku')  ? ' ⭐' : ''
-    const actOk = (pay.active === 'orkut')   ? ' ⭐' : ''
+    const actSw = (pay.active === 'saweria') ? ' ⭐' : ''
     let activeName = '🅿️ Pakasir'
     if (pay.active === 'duitku') activeName = '🅳 Duitku'
-    if (pay.active === 'orkut') activeName = '🅾️ Orkut'
+    if (pay.active === 'saweria') activeName = '🍧 Saweria'
     let cap = '*💳 SETTING PAYMENT*\n'
     cap += 'Active gateway: *' + activeName + '*\n\n'
     cap += 'Pilih gateway untuk dikonfigurasi:\n\n'
@@ -3182,7 +3180,7 @@ export async function handleAdminCallback(env, cq) {
       { inline_keyboard: [
         [{ text: onPk + ' Pakasir ' + (gwPk.enabled ? '(aktif)' : '(nonaktif)') + actPk, callback_data: 'adm_pay_pakasir' }],
         [{ text: onDk + ' Duitku (QRIS) '   + (gwDk.enabled ? '(aktif)' : '(nonaktif)') + actDk, callback_data: 'adm_pay_duitku'  }],
-        [{ text: onOk + ' Orkut (QRIS) '    + (gwOk.enabled ? '(aktif)' : '(nonaktif)') + actOk, callback_data: 'adm_pay_orkut'   }],
+        [{ text: onSw + ' Saweria (QRIS) '  + (gwSw.enabled ? '(aktif)' : '(nonaktif)') + actSw, callback_data: 'adm_pay_saweria'  }],
         [{ text: '🔙 Kembali', callback_data: 'adm_settings' }]
       ] }, 'Markdown'
     )
@@ -3419,102 +3417,118 @@ export async function handleAdminCallback(env, cq) {
     await savePayCfg(env, pay); await showDuitkuMenu(env, chatId, messageId)
     await tgAnswerCallbackQuery(env, cqId, '♻️ Duitku config di-reset.', true); return
   }
-  if (data === 'adm_pay_orkut') {
-    await showOrkutMenu(env, chatId, messageId); return
+  if (data === 'adm_pay_saweria') {
+    await showSaweriaMenu(env, chatId, messageId); return
   }
-  if (data === 'adm_pay_ok_toggle') {
-    const pay = await getPayCfg(env); pay.gateways.orkut.enabled = !pay.gateways.orkut.enabled
-    await savePayCfg(env, pay); await showOrkutMenu(env, chatId, messageId); return
+  if (data === 'adm_pay_sw_toggle') {
+    const pay = await getPayCfg(env); pay.gateways.saweria.enabled = !pay.gateways.saweria.enabled
+    await savePayCfg(env, pay); await showSaweriaMenu(env, chatId, messageId); return
   }
-  if (data === 'adm_pay_ok_baseurl') {
-    await writeJSON(env, 'adminState_' + fromId, { action: 'pay_ok_baseurl' })
+  if (data === 'adm_pay_sw_username') {
+    await writeJSON(env, 'adminState_' + fromId, { action: 'pay_sw_username' })
     await tgEditMessageText(env, chatId, messageId,
-      '*🔑 Base URL Orkut*\nKirim Base URL gateway Orkut (contoh: `https://justice-trades-cities-groundwater.trycloudflare.com`).\n\n_Ketik /batal jika tidak jadi._',
-      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_pay_orkut' }]] }, 'Markdown'
+      '*🔑 Username Saweria*\nKirim username Saweria (slug di URL, contoh: `tokoanda` — dari saweria.co/tokoanda).\n\n_Ketik /batal jika tidak jadi._',
+      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_pay_saweria' }]] }, 'Markdown'
     ); return
   }
-  if (data === 'adm_pay_ok_apikey') {
-    await writeJSON(env, 'adminState_' + fromId, { action: 'pay_ok_apikey' })
+  if (data === 'adm_pay_sw_userid') {
+    await writeJSON(env, 'adminState_' + fromId, { action: 'pay_sw_userid' })
     await tgEditMessageText(env, chatId, messageId,
-      '*🔐 API Key Orkut*\nKirim API Key project. Pesan Anda akan dihapus otomatis untuk keamanan.\n\n_Ketik /batal jika tidak jadi._',
-      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_pay_orkut' }]] }, 'Markdown'
+      '*🆔 User ID Saweria*\nKirim User ID Saweria (UUID, contoh: `595ace77-9e88-493b-acae-e9752b0cd829`).\nAmbil dari saweria.co → Settings/API atau DevTools halaman donasi.\n\n_Ketik /batal jika tidak jadi._',
+      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_pay_saweria' }]] }, 'Markdown'
     ); return
   }
-  if (data === 'adm_pay_ok_fee') {
-    const pay = await getPayCfg(env); const gw = pay.gateways.orkut
+  if (data === 'adm_pay_sw_fee') {
+    const pay = await getPayCfg(env); const gw = pay.gateways.saweria
     await tgEditMessageText(env, chatId, messageId,
-      '*💰 Fee Transaksi Orkut*\nFee saat ini: *' + feeLabel(gw) + '*\n\n_Fee ini independen dari gateway lain._ Set beda-beda sesuai biaya.',
+      '*💰 Fee Transaksi Saweria*\nFee saat ini: *' + feeLabel(gw) + '*\n\n_Fee ini independen dari gateway lain._ Set beda-beda sesuai biaya.',
       { inline_keyboard: [
-        [{ text: '📊 Fee Persen (' + Number(gw.feePercent||0) + '%)', callback_data: 'adm_pay_ok_feepct' }],
-        [{ text: '💵 Fee Nominal (Rp' + Number(gw.feeNominal||0).toLocaleString('id-ID') + ')', callback_data: 'adm_pay_ok_feenom' }],
-        [{ text: '↻ Reset Fee (0)', callback_data: 'adm_pay_ok_feereset' }],
-        [{ text: '🔙 Kembali', callback_data: 'adm_pay_orkut' }]
+        [{ text: '📊 Fee Persen (' + Number(gw.feePercent||0) + '%)', callback_data: 'adm_pay_sw_feepct' }],
+        [{ text: '💵 Fee Nominal (Rp' + Number(gw.feeNominal||0).toLocaleString('id-ID') + ')', callback_data: 'adm_pay_sw_feenom' }],
+        [{ text: '↻ Reset Fee (0)', callback_data: 'adm_pay_sw_feereset' }],
+        [{ text: '🔙 Kembali', callback_data: 'adm_pay_saweria' }]
       ] }, 'Markdown'
     ); return
   }
-  if (data === 'adm_pay_ok_feepct') {
-    await writeJSON(env, 'adminState_' + fromId, { action: 'pay_ok_feepct' })
+  if (data === 'adm_pay_sw_feepct') {
+    await writeJSON(env, 'adminState_' + fromId, { action: 'pay_sw_feepct' })
     await tgEditMessageText(env, chatId, messageId,
-      '*📊 Fee Persen Orkut*\nKirim angka 0–100 (contoh: `2.5` untuk 2.5%).\n\n_Ketik /batal jika ingin membatalkan._ Kirim `0` untuk menonaktifkan.\n\n_Ketik /batal jika tidak jadi._',
-      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_pay_ok_fee' }]] }, 'Markdown'
+      '*📊 Fee Persen Saweria*\nKirim angka 0–100 (contoh: `2.5` untuk 2.5%). Kirim `0` untuk menonaktifkan.\n\n_Ketik /batal jika tidak jadi._',
+      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_pay_sw_fee' }]] }, 'Markdown'
     ); return
   }
-  if (data === 'adm_pay_ok_feenom') {
-    await writeJSON(env, 'adminState_' + fromId, { action: 'pay_ok_feenom' })
+  if (data === 'adm_pay_sw_feenom') {
+    await writeJSON(env, 'adminState_' + fromId, { action: 'pay_sw_feenom' })
     await tgEditMessageText(env, chatId, messageId,
-      '*💵 Fee Nominal Orkut (Rp)*\nKirim nominal fee dalam Rupiah (contoh: `1000`).\n\n_Ketik /batal jika ingin membatalkan._ Kirim `0` untuk menonaktifkan.\n\n_Ketik /batal jika tidak jadi._',
-      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_pay_ok_fee' }]] }, 'Markdown'
+      '*💵 Fee Nominal Saweria (Rp)*\nKirim nominal fee dalam Rupiah (contoh: `1000`). Kirim `0` untuk menonaktifkan.\n\n_Ketik /batal jika tidak jadi._',
+      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_pay_sw_fee' }]] }, 'Markdown'
     ); return
   }
-  if (data === 'adm_pay_ok_feereset') {
-    const pay = await getPayCfg(env); pay.gateways.orkut.feePercent = 0; pay.gateways.orkut.feeNominal = 0
-    await savePayCfg(env, pay); await showOrkutMenu(env, chatId, messageId); return
+  if (data === 'adm_pay_sw_feereset') {
+    const pay = await getPayCfg(env); pay.gateways.saweria.feePercent = 0; pay.gateways.saweria.feeNominal = 0
+    await savePayCfg(env, pay); await showSaweriaMenu(env, chatId, messageId); return
   }
-  if (data === 'adm_pay_ok_expiry') {
-    await writeJSON(env, 'adminState_' + fromId, { action: 'pay_ok_expiry' })
+  if (data === 'adm_pay_sw_expiry') {
+    await writeJSON(env, 'adminState_' + fromId, { action: 'pay_sw_expiry' })
     await tgEditMessageText(env, chatId, messageId,
-      '*⏱️ Expiry Orkut (menit)*\nKirim angka menit untuk masa berlaku QRIS (contoh: `10`).\n\n_Ketik /batal jika tidak jadi._',
-      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_pay_orkut' }]] }, 'Markdown'
+      '*⏱️ Expiry Saweria (menit)*\nKirim angka menit untuk masa berlaku QRIS (contoh: `10`).\n\n_Ketik /batal jika tidak jadi._',
+      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_pay_saweria' }]] }, 'Markdown'
     ); return
   }
-  if (data === 'adm_pay_ok_test') {
-    const pay = await getPayCfg(env); const gw = pay.gateways.orkut
-    if (!gw.baseUrl || !gw.apiKey) {
+  if (data === 'adm_pay_sw_test') {
+    const pay = await getPayCfg(env); const gw = pay.gateways.saweria
+    if (!gw.username || !gw.userId) {
       await tgEditMessageText(env, chatId, messageId,
-        '*❌ Uji Koneksi Gagal*\n\n⚠️ Silakan isi **Base URL** dan **API Key** terlebih dahulu sebelum melakukan uji koneksi.',
-        { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_pay_orkut' }]] }, 'Markdown'
+        '*❌ Uji Koneksi Gagal*\n\n⚠️ Silakan isi **Username** dan **User ID** terlebih dahulu sebelum melakukan uji koneksi.',
+        { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_pay_saweria' }]] }, 'Markdown'
       ); return
     }
-    const { orkutTest } = await import('./orkut.js')
-    const r = await orkutTest(gw)
+    const { saweriaTest } = await import('./saweria.js')
+    const r = await saweriaTest(gw)
     let out
-    if (r.ok) out = '✅ Koneksi OK\nReference: `' + r.reference + '`\nStatus: *' + r.status + '*\nQR Link: `' + r.qrLink + '`'
+    if (r.ok) out = '✅ Koneksi OK\nUser ID ter-resolve: `' + r.userId + '`\nCocok dengan config: *' + (r.userIdMatch ? 'YA' : 'TIDAK — update?') + '*'
     else out = '❌ Gagal (' + r.stage + '): ' + (r.error || 'unknown')
-    await tgEditMessageText(env, chatId, messageId, '*🧪 Test Koneksi Orkut*\n\n' + out,
-      { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_pay_orkut' }]] }, 'Markdown'
+    await tgEditMessageText(env, chatId, messageId, '*🧪 Test Koneksi Saweria*\n\n' + out,
+      { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_pay_saweria' }]] }, 'Markdown'
     ); return
   }
-  if (data === 'adm_pay_ok_activate') {
+  if (data === 'adm_pay_sw_autoid') {
+    // resolve user_id otomatis dari username publik
+    const pay = await getPayCfg(env); const gw = pay.gateways.saweria
+    if (!gw.username) {
+      await tgAnswerCallbackQuery(env, cqId, '⚠️ Isi username dulu.', true); return
+    }
+    const { saweriaResolveUserId } = await import('./saweria.js')
+    const r = await saweriaResolveUserId(gw.username)
+    if (!r.ok) {
+      await tgAnswerCallbackQuery(env, cqId, '❌ ' + (r.error || 'gagal'), true); return
+    }
+    gw.userId = r.userId
+    await savePayCfg(env, pay)
+    await tgAnswerCallbackQuery(env, cqId, '✅ User ID otomatis: ' + r.userId.slice(0, 8) + '…', true)
+    await showSaweriaMenu(env, chatId, messageId); return
+  }
+  if (data === 'adm_pay_sw_activate') {
     const pay = await getPayCfg(env)
-    const gw = pay.gateways.orkut
-    if (!gw.baseUrl || !gw.apiKey) {
+    const gw = pay.gateways.saweria
+    if (!gw.username || !gw.userId) {
       await tgEditMessageText(env, chatId, messageId,
-        '*⚠️ Gagal Mengaktifkan*\n\nSilakan isi **Base URL** dan **API Key** terlebih dahulu sebelum menjadikannya active gateway.',
-        { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_pay_orkut' }]] }, 'Markdown'
+        '*⚠️ Gagal Mengaktifkan*\n\nSilakan isi **Username** dan **User ID** terlebih dahulu sebelum menjadikannya active gateway.',
+        { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_pay_saweria' }]] }, 'Markdown'
       ); return
     }
     gw.enabled = true
-    pay.active = 'orkut'; await savePayCfg(env, pay)
-    await tgAnswerCallbackQuery(env, cqId, '⭐ Orkut dijadikan active gateway!', true)
-    await showOrkutMenu(env, chatId, messageId); return
+    pay.active = 'saweria'; await savePayCfg(env, pay)
+    await tgAnswerCallbackQuery(env, cqId, '⭐ Saweria dijadikan active gateway!', true)
+    await showSaweriaMenu(env, chatId, messageId); return
   }
-  if (data === 'adm_pay_ok_reset') {
+  if (data === 'adm_pay_sw_reset') {
     const pay = await getPayCfg(env)
     const def = defaultPayCfg()
-    pay.gateways.orkut = def.gateways.orkut
-    if (pay.active === 'orkut') pay.active = 'pakasir'
-    await savePayCfg(env, pay); await showOrkutMenu(env, chatId, messageId)
-    await tgAnswerCallbackQuery(env, cqId, '♻️ Orkut config di-reset.', true); return
+    pay.gateways.saweria = def.gateways.saweria
+    if (pay.active === 'saweria') pay.active = 'pakasir'
+    await savePayCfg(env, pay); await showSaweriaMenu(env, chatId, messageId)
+    await tgAnswerCallbackQuery(env, cqId, '♻️ Saweria config di-reset.', true); return
   }
   if (data === 'adm_set_bcstok_img') {
     const cfgimg = await readJSON(env, 'BotConfig', {})
@@ -4142,29 +4156,31 @@ async function showDuitkuMenu(env, chatId, messageId) {
   await tgEditMessageText(env, chatId, messageId, cap, { inline_keyboard: rows }, 'Markdown')
 }
 
-// ─── Helper: Orkut Menu (QRIS-only Private Gateway) ──────────────────
-async function showOrkutMenu(env, chatId, messageId) {
-  const pay = await getPayCfg(env); const gw = pay.gateways.orkut
-  const isActive = (pay.active === 'orkut')
+// ─── Helper: Saweria Menu (QRIS-only) ───────────────────────────────
+async function showSaweriaMenu(env, chatId, messageId) {
+  const pay = await getPayCfg(env); const gw = pay.gateways.saweria
+  const isActive = (pay.active === 'saweria')
   const status = gw.enabled ? '🟢 Aktif' : '⚪ Nonaktif'
-  const baseUrl = gw.baseUrl ? gw.baseUrl : '(belum di-set)'
-  const apiSet = gw.apiKey ? '✅ Terisi' : '❌ Kosong'
+  const usernameTxt = gw.username ? '`' + gw.username + '`' : '(belum di-set)'
+  const userIdTxt = gw.userId ? '`' + String(gw.userId).slice(0, 8) + '…`' : '(belum di-set)'
   const feeTxt = feeLabel(gw)
   const exp = Number(gw.expiryPeriod || 10) + ' menit'
   const activeBadge = isActive ? '  ⭐ (active gateway)' : ''
-  let cap = '*🅾️ ORKUT — Private QRIS Gateway*' + activeBadge + '\n\n'
+  let cap = '*🍧 SAWERIA — QRIS Payment*' + activeBadge + '\n\n'
   cap += 'Status         : ' + status + '\n'
-  cap += 'Base URL       : `' + baseUrl + '`\n'
-  cap += 'API Key        : ' + apiSet + '\n'
-  cap += 'Fee (Orkut)    : *' + feeTxt + '*  _(independen)_\n'
+  cap += 'Username       : ' + usernameTxt + '\n'
+  cap += 'User ID        : ' + userIdTxt + '\n'
+  cap += 'Fee (Saweria)  : *' + feeTxt + '*  _(independen)_\n'
   cap += 'Expiry         : ' + exp + '\n'
+  cap += '\n_Ambil kredensial: saweria.co → Settings/API_'
   const rows = [
-    [{ text: (gw.enabled ? '🔴 Nonaktifkan' : '🟢 Aktifkan'), callback_data: 'adm_pay_ok_toggle' }],
-    [{ text: '🔑 Base URL', callback_data: 'adm_pay_ok_baseurl' }, { text: '🔐 API Key', callback_data: 'adm_pay_ok_apikey' }],
-    [{ text: '💰 Fee Orkut (' + feeTxt + ')', callback_data: 'adm_pay_ok_fee' }, { text: '⏱️ Expiry (' + exp + ')', callback_data: 'adm_pay_ok_expiry' }],
-    [{ text: '🧪 Test Koneksi', callback_data: 'adm_pay_ok_test' }],
-    [{ text: (isActive ? '⭐ Sudah Active' : '✅ Jadikan Active Gateway'), callback_data: 'adm_pay_ok_activate' }],
-    [{ text: '♻️ Reset Config', callback_data: 'adm_pay_ok_reset' }, { text: '🔙 Kembali', callback_data: 'adm_payment' }]
+    [{ text: (gw.enabled ? '🔴 Nonaktifkan' : '🟢 Aktifkan'), callback_data: 'adm_pay_sw_toggle' }],
+    [{ text: '🔑 Username', callback_data: 'adm_pay_sw_username' }, { text: '🆔 User ID', callback_data: 'adm_pay_sw_userid' }],
+    [{ text: '🪄 Auto-Resolve User ID', callback_data: 'adm_pay_sw_autoid' }],
+    [{ text: '💰 Fee Saweria (' + feeTxt + ')', callback_data: 'adm_pay_sw_fee' }, { text: '⏱️ Expiry (' + exp + ')', callback_data: 'adm_pay_sw_expiry' }],
+    [{ text: '🧪 Test Koneksi', callback_data: 'adm_pay_sw_test' }],
+    [{ text: (isActive ? '⭐ Sudah Active' : '✅ Jadikan Active Gateway'), callback_data: 'adm_pay_sw_activate' }],
+    [{ text: '♻️ Reset Config', callback_data: 'adm_pay_sw_reset' }, { text: '🔙 Kembali', callback_data: 'adm_payment' }]
   ]
   await tgEditMessageText(env, chatId, messageId, cap, { inline_keyboard: rows }, 'Markdown')
 }

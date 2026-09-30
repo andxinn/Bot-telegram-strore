@@ -36,13 +36,13 @@ async function checkPendingPayments(env) {
         continue
       }
       let processed = false
-      if (details.provider === 'orkut' && details.orkut_gw) {
-        const { orkutStatus } = await import('./orkut.js')
-        const trxStat = await orkutStatus(details.orkut_gw, details.orkut_ref)
+      if (details.provider === 'saweria' && details.saweria_id) {
+        const { saweriaStatus } = await import('./saweria.js')
+        const trxStat = await saweriaStatus(null, details.saweria_id)
         if (trxStat && trxStat.ok && trxStat.status === 'PAID') {
           await processPaymentSuccess(env, session, {
-            status: 'completed', reference: details.orkut_ref,
-            amount: Number(details.total_amount), gateway: 'orkut'
+            status: 'completed', reference: details.saweria_id,
+            amount: Number(details.total_amount), gateway: 'saweria'
           })
           processed = true
         } else if (trxStat && trxStat.ok && trxStat.status === 'EXPIRED') {
@@ -82,9 +82,8 @@ async function handleExpiredPayment(env, session) {
   if (!details) return
   if (details.provider === 'pakasir' && details.pakasir_gw) {
     try { const { pakasirCancel } = await import('./pakasir.js'); await pakasirCancel(details.pakasir_gw, session.id, details.pakasir_amount) } catch (e) {}
-  } else if (details.provider === 'orkut' && details.orkut_gw && details.orkut_ref) {
-    try { const { orkutCancel } = await import('./orkut.js'); await orkutCancel(details.orkut_gw, details.orkut_ref) } catch (e) {}
   }
+  // saweria: tidak ada API cancel — donasi pending akan expired sendiri di sisi Saweria
   try {
     if (details.key) {
       await tgDeleteMessage(env, details.userId, details.key)

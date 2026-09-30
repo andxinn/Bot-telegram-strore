@@ -16,13 +16,6 @@ let WebhookSecret = ''
 let DevToken = ''
 let BannerFileId = ''
 let DataQris = ''
-let PaymentSaweria = false
-let PaymentOkeConnect = true
-let OkeMerchantId = ''
-let OkeSignature = ''
-let KropaApi = ''
-let KropaApiKey = ''
-let SaweriaUserId = ''
 let bannerStartB64 = ''
 let bannerListB64 = ''
 let orderBotName = ''
@@ -57,13 +50,6 @@ async function initConfig(env) {
   DevToken = env.DEV_TOKEN || ''
   BannerFileId = env.BANNER_FILE_ID || env.STIKER_START_FILEID || ''
   DataQris = env.DATA_QRIS || ''
-  PaymentSaweria = (env.PAYMENT_SAWERIA || 'of').toLowerCase() === 'on'
-  PaymentOkeConnect = !PaymentSaweria
-  OkeMerchantId = env.OKE_MERCHANTID || ''
-  OkeSignature = env.OKE_SIGNATURE || ''
-  KropaApi = env.KROPA_API || ''
-  KropaApiKey = env.KROPA_APIKEY || ''
-  SaweriaUserId = env.SAWERIA_USERID || ''
   try {
     const kvConfig = await readJSON(env, 'BotConfig', null)
     if (kvConfig) {
@@ -94,8 +80,7 @@ async function initConfig(env) {
 export {
   NamaBot, StoreName, OwnerID, OwnerUsername, ChannelLog, InvoiceLogger, channelBackup,
   ChannelStore, CS, JamBackup, Mode, SimulatePayment, SimulateDelay,
-  WebhookSecret, DevToken, BannerFileId, DataQris, PaymentSaweria,
+  WebhookSecret, DevToken, BannerFileId, DataQris,
   bannerStartB64, bannerListB64, orderBotName, caraOrderText,
-  PaymentOkeConnect, OkeMerchantId, OkeSignature, KropaApi, KropaApiKey,
-  SaweriaUserId, ButtonMenu, initConfig, leaderboardEnabled, leaderboardBanner, channelTicket
+  ButtonMenu, initConfig, leaderboardEnabled, leaderboardBanner, channelTicket
 }

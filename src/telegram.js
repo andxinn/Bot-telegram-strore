@@ -203,9 +203,18 @@ async function tgDeleteForumTopic(env, chatId, messageThreadId) {
   return await res.json()
 }
 
+async function tgEditForumTopic(env, chatId, messageThreadId, name) {
+  const res = await fetch(TG_API(env.BOT_TOKEN) + '/editForumTopic', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, message_thread_id: messageThreadId, name })
+  })
+  return await res.json()
+}
+
 export {
   tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgGetFile, tgDownloadFile, tgEditMessageText,
   tgEditMessageMedia, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendDocumentFile,
   tgGetChat, tgSendChatAction, tgSetMyCommands, tgSendSticker,
-  tgCreateForumTopic, tgCloseForumTopic, tgReopenForumTopic, tgDeleteForumTopic
+  tgCreateForumTopic, tgCloseForumTopic, tgReopenForumTopic, tgDeleteForumTopic, tgEditForumTopic
 }

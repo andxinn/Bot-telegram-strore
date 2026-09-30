@@ -5,7 +5,7 @@ import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, get
 import { getUserList, getUser, addUser, addSaldo, minSaldo, cekSaldo, isOwner, isRegistered, getRole, isBanned } from './user.js'
 import { getMainMenuKeyboard, getProductNumberKeyboard, getReplyKeyboard } from './keyboard.js'
 import { handleCommand } from './commands.js'
-import { handleAdminState, showAdminPanel, recordStokBaru } from './admin.js'
+import { handleAdminState, showAdminPanel, recordStokBaru, ticketAge } from './admin.js'
 import { ITEMS_PER_PAGE } from './constants.js'
 import { generateQris } from './qris.js'
 import { getActiveGateway, pakasirConfigured, calcFee, feeLabel, methodLabel, pakasirCreate, qrImageUrl } from './pakasir.js'
@@ -1276,6 +1276,7 @@ async function handleTicketState(env, msg, state) {
       userUsername: msg.from.username || '',
       status: 'open',
       createdAt: new Date().toISOString(),
+      lastActivityAt: Date.now(),
       messages: [msgObj]
     }
 
@@ -1330,6 +1331,25 @@ async function handleTicketState(env, msg, state) {
       } catch (e) {
         console.error('[Fallback Send Ticket CATCH ERROR]', e)
       }
+    }
+
+    // Kirim notifikasi DM ke admin/owner (tidak perlu buka grup dulu)
+    try {
+      const roles = await readJSON(env, 'Role', [])
+      const notifText = '🎫 <b>Tiket Baru Masuk!</b>\n<b>' + escH(newTicket.ticketId) + '</b> • 🙋 ' + escH(username) + '\n\n' + escH(textVal)
+      const notifKb = {
+        inline_keyboard: [[
+          { text: '💬 Balas Tiket', callback_data: 'tk_adm_reply_' + newTicket.ticketId },
+          { text: '👁 Lihat di Panel', callback_data: 'tk_adm_view_' + newTicket.ticketId }
+        ]]
+      }
+      const targets = [OwnerID, ...roles.filter(r => r.role === 'admin').map(r => r.id)]
+      for (const admId of targets) {
+        if (String(admId) === String(fromId)) continue
+        try { await tgSendMessage(env, admId, notifText, notifKb, 'HTML') } catch (e) {}
+      }
+    } catch (e) {
+      console.error('[admin ticket notify]', e.message)
     }
 
     tickets.push(newTicket)
@@ -1387,6 +1407,7 @@ async function handleTicketState(env, msg, state) {
     }
 
     tickets[tIdx].status = 'open'
+    tickets[tIdx].lastActivityAt = Date.now()
     tickets[tIdx].messages.push(msgObj)
     await writeJSON(env, 'Tickets', tickets)
 
@@ -1395,7 +1416,7 @@ async function handleTicketState(env, msg, state) {
     if (t.logChatId && t.threadId) {
       try {
         const usn = t.userUsername ? '@' + t.userUsername : (t.userName || 'User')
-        let fMsg = '<b>' + escH(usn) + '</b> (' + jamHM + ')\npesan : ' + escH(textVal)
+        let fMsg = '<b>🙋 ' + escH(usn) + '</b><i> (' + jamHM + ')</i>\n' + escH(textVal)
         if (photoFileId) {
           await tgSendPhoto(env, t.logChatId, photoFileId, fMsg, null, 'HTML', t.threadId)
         } else if (docFileId) {
@@ -1403,12 +1424,24 @@ async function handleTicketState(env, msg, state) {
         } else {
           await tgSendMessage(env, t.logChatId, fMsg, null, 'HTML', t.threadId)
         }
+        // Reopen topic jika sebelumnya di-close, agar balasan user tidak nyasar
+        try { await tgReopenForumTopic(env, t.logChatId, t.threadId) } catch (e) {}
       } catch (e) {
         console.error('[forum follow up send]', e.message)
       }
     }
 
     await tgSendMessage(env, chatId, '✓ *Follow up terkirim!* Harap tunggu tanggapan admin.', getMainMenuKeyboard(), 'Markdown')
+
+    // Update judul topik forum bawa umur tiket
+    if (t.logChatId && t.threadId) {
+      try {
+        const { tgEditForumTopic } = await import('./telegram.js')
+        const shortId = t.ticketId.split('-')[1] || 'TKT'
+        const uname = t.userUsername ? t.userUsername : (t.userName || 'User')
+        await tgEditForumTopic(env, t.logChatId, t.threadId, '🎫 [' + shortId + '] ' + uname + ' • ' + ticketAge(t).label)
+      } catch (e) {}
+    }
 
     if (t.logChatId && t.logMessageId) {
       try {

@@ -715,73 +715,49 @@ async function handleDepositState(env, msg, state) {
     }
     const agD = await getActiveGateway(env)
     const gwD = agD.gw
-    // ─── Orkut branch (QRIS-only Private Gateway) ───
-    if (agD.name === 'orkut') {
-      const { orkutConfigured, orkutCreateQris } = await import('./orkut.js')
-      if (!orkutConfigured(gwD)) {
+    // ─── Saweria branch (QRIS-only) ───
+    if (agD.name === 'saweria') {
+      const { saweriaConfigured, saweriaCreate, saweriaSession, saweriaCaption } = await import('./saweria.js')
+      if (!saweriaConfigured(gwD)) {
         await deleteKey(env, 'depositState_' + fromId)
-        await tgSendMessage(env, chatId, '⚠️ Payment gateway deposit (Orkut) belum aktif. Hubungi admin.')
+        await tgSendMessage(env, chatId, '⚠️ Payment gateway deposit (Saweria) belum aktif. Hubungi admin.')
         return
       }
-      const depoFeeOk = calcFee(gwD, amount)
-      const depoChargeOk = amount + depoFeeOk
-      const trxIdOk = generateTrxId()
-      const createdOk = await orkutCreateQris(gwD, trxIdOk, depoChargeOk, gwD.expiryPeriod || 10)
-      if (!createdOk.ok) {
+      const depoFeeSw = calcFee(gwD, amount)
+      const depoChargeSw = amount + depoFeeSw
+      const trxIdSw = generateTrxId()
+      const createdSw = await saweriaCreate(gwD, trxIdSw, depoChargeSw, {
+        customerName: msg.from.first_name || 'Customer',
+        email: (msg.from.username ? msg.from.username : ('u' + chatId)) + '@bot.local'
+      })
+      if (!createdSw.ok) {
         await deleteKey(env, 'depositState_' + fromId)
-        await tgSendMessage(env, chatId, '✕ Gagal membuat transaksi Orkut: ' + (createdOk.error || 'coba lagi'))
+        await tgSendMessage(env, chatId, '✕ Gagal membuat transaksi Saweria: ' + (createdSw.error || 'coba lagi'))
         return
       }
-      const finalTotalOk = Number(createdOk.totalBayar || depoChargeOk)
-      const orkutUnique = Math.max(0, finalTotalOk - depoChargeOk)
-      const orkutDepoExpMin = Number(gwD.expiryPeriod || 10)
-      const expiredOk = expiredTime(orkutDepoExpMin)
-      const sessionOk = {
-        id: trxIdOk, status: 'pending', depositDetails: {
-          userId: chatId, depo_id: trxIdOk, type: 'deposit',
-          total_amount: finalTotalOk, amount: amount,
-          expired: expiredOk, key: null, nama: msg.from.first_name, username: msg.from.username,
-          provider: 'orkut', orkut_amount: finalTotalOk,
-          orkut_reference: createdOk.reference, orkut_qr: createdOk.qrString, orkut_qrLink: createdOk.qrLink,
-          orkut_ref: createdOk.reference,
-          orkut_gw: { baseUrl: gwD.baseUrl, apiKey: gwD.apiKey, expiryPeriod: gwD.expiryPeriod },
-          expiryMinutes: orkutDepoExpMin,
-          display_total: finalTotalOk
-        }
-      }
-      const sesOk = await readJSON(env, 'SessionDeposit', [])
-      sesOk.push(sessionOk)
-      await writeJSON(env, 'SessionDeposit', sesOk)
+      const swExpMin = Number(gwD.expiryPeriod) || 10
+      const sessionSw = saweriaSession({
+        trxId: trxIdSw, userId: chatId, type: 'deposit', amount, charge: depoChargeSw,
+        gw: gwD, nama: msg.from.first_name, username: msg.from.username
+      })
+      sessionSw.depositDetails.saweria_id = createdSw.id
+      const sesSw = await readJSON(env, 'SessionDeposit', [])
+      sesSw.push(sessionSw)
+      await writeJSON(env, 'SessionDeposit', sesSw)
       await deleteKey(env, 'depositState_' + fromId)
-      let pesanOk = '╭───〔 ▤ DEPOSIT via QRIS 〕───\n'
-      pesanOk += '┊ *Jumlah     :* ' + ParseIdr(amount) + '\n'
-      if (depoFeeOk > 0) pesanOk += '┊ *Fee (' + feeLabel(gwD) + '):* ' + ParseIdr(depoFeeOk) + '\n'
-      if (orkutUnique > 0) pesanOk += '┊ *Kode Unik  :* ' + ParseIdr(orkutUnique) + '\n'
-      pesanOk += '┊ *Total Bayar :* ' + ParseIdr(finalTotalOk) + '\n'
-      pesanOk += '├──────────────────\n'
-      pesanOk += '┊ *ID Trx     :* ' + trxIdOk + '\n'
-      pesanOk += '┊ *Reference  :* `' + (createdOk.reference || '-') + '`\n'
-      pesanOk += '╰──────────────────\n\n'
-      pesanOk += '⏰ Kadaluwarsa dalam *' + orkutDepoExpMin + ' menit*\n'
-      pesanOk += '📲 Scan QRIS di bawah untuk membayar'
-      const depoRowsOk = [[{ text: '✕ Batalkan', callback_data: 'batal_deposit_' + trxIdOk, style: 'danger' }]]
-      const keyboardOk = { inline_keyboard: depoRowsOk }
-      const qrImgOk = createdOk.qrString
-        ? ('https://quickchart.io/qr?text=' + encodeURIComponent(createdOk.qrString) + '&size=400')
-        : createdOk.qrLink
-      if (qrImgOk) {
-        const sentOk = await tgSendPhotoUrl(env, chatId, qrImgOk, pesanOk, keyboardOk)
-        try {
-          const keyMsgOk = sentOk && sentOk.result && sentOk.result.message_id
-          if (keyMsgOk) {
-            const sesOk2 = await readJSON(env, 'SessionDeposit', [])
-            const idxOk = sesOk2.findIndex(s => s.id === trxIdOk)
-            if (idxOk >= 0) { sesOk2[idxOk].depositDetails.key = keyMsgOk; await writeJSON(env, 'SessionDeposit', sesOk2) }
-          }
-        } catch (e) {}
-      } else {
-        await tgSendMessage(env, chatId, pesanOk, keyboardOk, 'Markdown')
-      }
+      const pesanSw = saweriaCaption('DEPOSIT via SAWERIA', amount, depoChargeSw, depoFeeSw, gwD, swExpMin, trxIdSw)
+      const depoRowsSw = [[{ text: '\u274c Batalkan', callback_data: 'batal_deposit_' + trxIdSw, style: 'danger' }]]
+      const keyboardSw = { inline_keyboard: depoRowsSw }
+      const qrUrlSw = 'https://quickchart.io/qr?text=' + encodeURIComponent(createdSw.qrString) + '&size=400'
+      const sentSw = await tgSendPhotoUrl(env, chatId, qrUrlSw, escapeMarkdown(pesanSw), keyboardSw)
+      try {
+        const keyMsgSw = sentSw && sentSw.result && sentSw.result.message_id
+        if (keyMsgSw) {
+          const sesSw2 = await readJSON(env, 'SessionDeposit', [])
+          const idxSw = sesSw2.findIndex(s => s.id === trxIdSw)
+          if (idxSw >= 0) { sesSw2[idxSw].depositDetails.key = keyMsgSw; await writeJSON(env, 'SessionDeposit', sesSw2) }
+        }
+      } catch (e) {}
       return
     }
     // ─── Duitku branch (QRIS-only) ───

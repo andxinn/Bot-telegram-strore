@@ -48,10 +48,10 @@ function defaultPayCfg() {
         feeNominal: 0,
         verifyIp: false
       },
-      orkut: {
+      saweria: {
         enabled: false,
-        baseUrl: 'https://justice-trades-cities-groundwater.trycloudflare.com',
-        apiKey: '',
+        username: '',
+        userId: '',
         expiryPeriod: 10,
         feePercent: 0,
         feeNominal: 0
@@ -68,7 +68,12 @@ async function getPayCfg(env) {
   if (!pay.gateways) pay.gateways = {}
   pay.gateways.pakasir = { ...def.gateways.pakasir, ...(pay.gateways.pakasir || {}) }
   pay.gateways.duitku  = { ...def.gateways.duitku,  ...(pay.gateways.duitku  || {}) }
-  pay.gateways.orkut   = { ...def.gateways.orkut,   ...(pay.gateways.orkut   || {}) }
+  pay.gateways.saweria = { ...def.gateways.saweria, ...(pay.gateways.saweria || {}) }
+  // legacy: konfigurasi orkut lama tidak lagi dipakai, pastikan tidak aktif
+  if (pay.gateways.orkut) {
+    if (pay.active === 'orkut') pay.active = 'pakasir'
+    delete pay.gateways.orkut
+  }
   return pay
 }
 

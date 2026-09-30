@@ -71,16 +71,23 @@ async function handleDuitkuWebhook(env, params) {
     const resultCode = params && (params.resultCode || params.resultcode)
     const amount = Number(params && params.amount)
     if (String(resultCode) !== '00') return { ok: false, reason: 'not_success', code: String(resultCode) }
-    const pay = await getPayCfg(env)
-    const gwCfg = pay && pay.gateways && pay.gateways.duitku
-    if (!gwCfg || !gwCfg.apiKey || !gwCfg.merchantCode) return { ok: false, reason: 'gateway_not_configured' }
-    const okSig = await duitkuVerifyCallback(gwCfg, params)
-    if (!okSig) return { ok: false, reason: 'bad_signature' }
     const sessions = await readJSON(env, 'SessionDeposit', [])
     const session = sessions.find(s => s.id === orderId && s.status === 'pending')
     if (!session) return { ok: false, reason: 'not_found' }
     const details = session.depositDetails || {}
     if (details.provider !== 'duitku' || !details.duitku_gw) return { ok: false, reason: 'provider_mismatch' }
+    // Verifikasi pakai snapshot kredensial saat create (details.duitku_gw =
+    // { merchantCode, apiKey, mode, qrisProvider }) agar rotasi apiKey di
+    // config live tidak mematahkan callback QR yang sudah terbit.
+    let gwCfg = (details.duitku_gw.merchantCode && details.duitku_gw.apiKey) ? details.duitku_gw : null
+    if (!gwCfg) {
+      console.warn('[duitku-webhook] snapshot duitku_gw tak lengkap, fallback ke config live')
+      const pay = await getPayCfg(env)
+      gwCfg = pay && pay.gateways && pay.gateways.duitku
+    }
+    if (!gwCfg || !gwCfg.apiKey || !gwCfg.merchantCode) return { ok: false, reason: 'gateway_not_configured' }
+    const okSig = await duitkuVerifyCallback(gwCfg, params)
+    if (!okSig) return { ok: false, reason: 'bad_signature' }
     if (Number(details.duitku_amount) !== amount) return { ok: false, reason: 'amount_mismatch' }
     const trxStat = await duitkuStatus(details.duitku_gw, orderId)
     if (!trxStat || String(trxStat.statusCode) !== '00') return { ok: false, reason: 'status_not_success' }

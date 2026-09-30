@@ -40,6 +40,13 @@ async function checkPendingPayments(env) {
         const { saweriaStatus } = await import('./saweria.js')
         const trxStat = await saweriaStatus(null, details.saweria_id)
         if (trxStat && trxStat.ok && trxStat.status === 'PAID') {
+          if (trxStat.amount === undefined) {
+            console.warn('[cron] Saweria PAID tanpa nominal, terima berdasar session: ' + session.id)
+          } else if (Number(trxStat.amount) !== Number(details.total_amount)) {
+            console.warn('[cron] Saweria nominal mismatch, skip: ' + session.id)
+            stillPending.push(session)
+            continue
+          }
           await processPaymentSuccess(env, session, {
             status: 'completed', reference: details.saweria_id,
             amount: Number(details.total_amount), gateway: 'saweria'
@@ -51,8 +58,14 @@ async function checkPendingPayments(env) {
         }
       }
       if (details.provider === 'pakasir' && details.pakasir_gw) {
+        const { amountsMatch } = await import('./pakasir.js')
         const trxDetail = await pakasirDetail(details.pakasir_gw, session.id, details.pakasir_amount)
         if (trxDetail && trxDetail.status === 'completed') {
+          if (!amountsMatch(trxDetail.total_payment ?? details.pakasir_amount, details.pakasir_amount)) {
+            console.warn('[cron] Pakasir nominal mismatch, skip: ' + session.id)
+            stillPending.push(session)
+            continue
+          }
           await processPaymentSuccess(env, session, trxDetail)
           processed = true
         }
@@ -60,6 +73,11 @@ async function checkPendingPayments(env) {
       if (details.provider === 'duitku' && details.duitku_gw) {
         const trxStat = await duitkuStatus(details.duitku_gw, session.id)
         if (trxStat && String(trxStat.statusCode) === '00') {
+          if (trxStat.amount !== undefined && trxStat.amount !== null && Number(trxStat.amount) !== Number(details.duitku_amount)) {
+            console.warn('[cron] Duitku nominal mismatch, skip: ' + session.id)
+            stillPending.push(session)
+            continue
+          }
           await processPaymentSuccess(env, session, {
             status: 'completed', reference: trxStat.reference,
             amount: Number(trxStat.amount || details.duitku_amount), gateway: 'duitku'

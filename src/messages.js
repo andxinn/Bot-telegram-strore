@@ -22,6 +22,9 @@ async function handleMessage(env, msg) {
       const tickets = await readJSON(env, 'Tickets', [])
       const tk = tickets.find(t => String(t.threadId) === String(tid))
       if (tk) {
+        // Hanya admin/owner yang boleh meneruskan sebagai "Tanggapan Admin"
+        const senderId = msg.from && msg.from.id
+        if (!isOwner(senderId) && await getRole(env, senderId) !== 'admin') return
         const m = msg
         const isCmd = m.text && m.text.trim().startsWith('/')
         if (!isCmd) {
@@ -112,6 +115,17 @@ async function handleMessage(env, msg) {
   if (await isBanned(env, fromId)) return
 
   if (text.startsWith('/') && text.toLowerCase() !== '/batal') {
+    // Jangan jalankan command saat user sedang input: teks berikutnya nyasar ke state basi
+    const busyState = (await existsKey(env, 'adminState_' + fromId)) ||
+      (await existsKey(env, 'manageState_' + fromId)) ||
+      (await existsKey(env, 'depositState_' + fromId)) ||
+      (await existsKey(env, 'ticketState_' + fromId)) ||
+      (await existsKey(env, 'orderState_' + fromId)) ||
+      (await existsKey(env, 'cekTrxState_' + fromId))
+    if (busyState) {
+      await tgSendMessage(env, chatId, '⏳ Selesaikan input dulu atau kirim /batal untuk membatalkan.')
+      return
+    }
     await handleCommand(env, msg)
     return
   }
@@ -119,6 +133,15 @@ async function handleMessage(env, msg) {
   const pmSession = await readJSON(env, 'PMSessions', [])
   const mySession = pmSession.find(s => String(s.userChatId) === String(fromId) || String(s.ownerChatId) === String(fromId))
   if (mySession) {
+    // /batal menutup sesi PM, bukan diteruskan
+    if (text.toLowerCase() === '/batal' || text === '🔴 Disconnect') {
+      const rest = pmSession.filter(s => s !== mySession)
+      await writeJSON(env, 'PMSessions', rest)
+      const targetId = String(mySession.userChatId) === String(fromId) ? mySession.ownerChatId : mySession.userChatId
+      try { await tgSendMessage(env, targetId, '🔴 Lawan bicara menutup sesi chat.') } catch (e) {}
+      await tgSendMessage(env, chatId, '🔴 Sesi chat ditutup.', getMainMenuKeyboard())
+      return
+    }
     const targetId = String(mySession.userChatId) === String(fromId) ? mySession.ownerChatId : mySession.userChatId
     if (msg.photo) {
       const photo = msg.photo[msg.photo.length - 1].file_id
@@ -164,11 +187,9 @@ async function handleMessage(env, msg) {
     }
   }
 
-  // Cek Transaksi input state
+  // Cek Transaksi input state (state dipertahankan bila ID salah ketik)
   const cekTrxSt = await readJSON(env, 'cekTrxState_' + fromId, null)
   if (cekTrxSt && cekTrxSt.step === 'waiting') {
-    await deleteKey(env, 'cekTrxState_' + fromId)
-    if (cekTrxSt.promptMid) { try { await tgDeleteMessage(env, chatId, cekTrxSt.promptMid) } catch (e) {} }
     const inputId = text.trim().slice(0, 60)
     const trxList = await readJSON(env, 'Trx', [])
     // SECURITY: hanya tampilkan trx milik user sendiri
@@ -177,6 +198,8 @@ async function handleMessage(env, msg) {
       await tgSendMessage(env, chatId, '✕ *Transaksi tidak ditemukan.*\n\nPastikan ID benar dan transaksi adalah milik Anda.', null, 'Markdown')
       return
     }
+    await deleteKey(env, 'cekTrxState_' + fromId)
+    if (cekTrxSt.promptMid) { try { await tgDeleteMessage(env, chatId, cekTrxSt.promptMid) } catch (e) {} }
     const tgl2 = found.tanggal ? formatWIB(found.tanggal) : '-'
     let det = '☰ *Detail Transaksi*\n'
     det += '┌' + '─'.repeat(20) + '\n'
@@ -853,9 +876,9 @@ async function handleDepositState(env, msg, state) {
     const session = {
       id: trxId, status: 'pending', depositDetails: {
         userId: chatId, depo_id: trxId, type: 'deposit',
-        total_amount: depoCharge, amount: amount,
+        total_amount: displayTotalD, amount: amount,
         expired, key: null, nama: msg.from.first_name, username: msg.from.username,
-        provider: 'pakasir', pakasir_amount: depoCharge, pakasir_method: gwD.method,
+        provider: 'pakasir', pakasir_amount: displayTotalD, pakasir_method: gwD.method,
         pakasir_gw: { slug: gwD.slug, apiKey: gwD.apiKey, method: gwD.method, mode: gwD.mode },
         expiryMinutes: 5,
         display_total: displayTotalD

@@ -90,7 +90,18 @@ async function saweriaStatus(gw, trxId) {
     const data = await res.json().catch(() => null)
     if (!data) return { ok: false, error: 'HTTP ' + res.status, stage: 'status' }
     const det = data.data || {}
-    if (!det.qr_string) return { ok: true, status: 'PAID', amount: det.amount || det.amount_raw, raw: data }
+    if (!det.qr_string) {
+      // KONTRAK PAID: { ok:true, status:'PAID', amount:number|undefined, raw }.
+      // API Saweria kadang tak kembalikan nominal saat status PAID — call-site
+      // WAJIB tolak PAID tanpa amount ATAU terima-dengan-warning (pakai total session).
+      const cand = [det.amount, det.amount_raw, det.donation_amount, det.nominal, det.total, det.total_amount, data.amount, data.donation_amount]
+      let amt = undefined
+      for (const c of cand) {
+        const n = Number(c)
+        if (Number.isFinite(n) && n > 0) { amt = n; break }
+      }
+      return { ok: true, status: 'PAID', amount: amt, raw: data }
+    }
     if (det.status === 'expired' || det.expired) return { ok: true, status: 'EXPIRED', raw: data }
     return { ok: true, status: 'PENDING', raw: data }
   } catch (e) {
@@ -115,14 +126,15 @@ function saweriaSession({ trxId, userId, type, amount, charge, gw, nama, usernam
   return {
     id: trxId, status: 'pending',
     depositDetails: {
+      ...extra,
       userId, type,
       total_amount: charge, amount,
       expired: expiredTime(Number(gw.expiryPeriod) || 10), key: null,
       nama, username,
-      provider: 'saweria', saweria_amount: charge, saweria_message: trxId,
+      provider: 'saweria', saweria_id: extra.saweria_id || null,
+      saweria_amount: charge, saweria_message: trxId,
       expiryMinutes: Number(gw.expiryPeriod) || 10,
-      display_total: charge,
-      ...extra
+      display_total: charge
     }
   }
 }

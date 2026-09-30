@@ -84,7 +84,6 @@ async function handleCallbackQuery(env, cq) {
   }
 
   if (data.startsWith('tk_view_')) {
-    await tgAnswerCallbackQuery(env, cqId, '🎫 Membuka rincian tiket', false)
     const parts = data.replace('tk_view_', '').split('_')
     const tkId = parts[0]
     const page = parts[1] ? parseInt(parts[1]) : null
@@ -95,6 +94,11 @@ async function handleCallbackQuery(env, cq) {
       await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket tidak ditemukan.', true)
       return
     }
+    if (String(t.userId) !== String(fromId) && !isOwner(fromId) && await getRole(env, fromId) !== 'admin') {
+      await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan tiket Anda.', true)
+      return
+    }
+    await tgAnswerCallbackQuery(env, cqId, '🎫 Membuka rincian tiket', false)
 
     const escH = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     const userUsn = t.userUsername ? '@' + t.userUsername : (t.userName || 'User')
@@ -193,6 +197,10 @@ async function handleCallbackQuery(env, cq) {
       await tgAnswerCallbackQuery(env, cqId, '⚠️ Media tidak ditemukan.', true)
       return
     }
+    if (String(t.userId) !== String(fromId) && !isOwner(fromId) && await getRole(env, fromId) !== 'admin') {
+      await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan tiket Anda.', true)
+      return
+    }
 
     const m = t.messages[msgIdx]
     if (m.photoFileId) {
@@ -216,10 +224,19 @@ async function handleCallbackQuery(env, cq) {
   }
 
   if (data.startsWith('tk_close_')) {
-    await tgAnswerCallbackQuery(env, cqId, '🔒 Tiket bantuan berhasil ditutup', false)
     const tkId = data.replace('tk_close_', '')
     const tickets = await readJSON(env, 'Tickets', [])
     const idx = tickets.findIndex(ticket => ticket.ticketId === tkId)
+    if (idx === -1) {
+      await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket tidak ditemukan.', true)
+      return
+    }
+    const ownT = tickets[idx]
+    if (String(ownT.userId) !== String(fromId) && !isOwner(fromId) && await getRole(env, fromId) !== 'admin') {
+      await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan tiket Anda.', true)
+      return
+    }
+    await tgAnswerCallbackQuery(env, cqId, '🔒 Tiket bantuan berhasil ditutup', false)
     if (idx !== -1) {
       const t = tickets[idx]
       t.status = 'closed'
@@ -247,8 +264,18 @@ async function handleCallbackQuery(env, cq) {
   }
 
   if (data.startsWith('tk_follow_')) {
-    await tgAnswerCallbackQuery(env, cqId, '📝 Membuka formulir pesan tambahan', false)
     const tkId = data.replace('tk_follow_', '')
+    const tickets = await readJSON(env, 'Tickets', [])
+    const ft = tickets.find(ticket => ticket.ticketId === tkId)
+    if (!ft) {
+      await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket tidak ditemukan.', true)
+      return
+    }
+    if (String(ft.userId) !== String(fromId) && !isOwner(fromId) && await getRole(env, fromId) !== 'admin') {
+      await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan tiket Anda.', true)
+      return
+    }
+    await tgAnswerCallbackQuery(env, cqId, '📝 Membuka formulir pesan tambahan', false)
     await writeJSON(env, 'ticketState_' + fromId, { step: 'follow_up', ticketId: tkId, cardMessageId: messageId })
     await editCard(env, cq, '📝 *FOLLOW UP TIKET: ' + tkId + '*\n\nSilakan ketik dan kirimkan pesan tambahan Anda untuk dikirim ke admin.\n\n_Ketik /batal jika batal._', null)
     return
@@ -273,7 +300,7 @@ async function handleCallbackQuery(env, cq) {
     return
   }
 
-  if (data === 'noop') { return }
+  if (data === 'noop') { await tgAnswerCallbackQuery(env, cqId, '', false); return }
 
   if (data === 'back_to_list') {
     await tgAnswerCallbackQuery(env, cqId, '📄 Membuka daftar produk', false)
@@ -311,11 +338,15 @@ async function handleCallbackQuery(env, cq) {
   }
 
   if (data === 'staff_call_cancel') {
-    await tgSendMessage(env, chatId, 'Baik kak, Admin tidak dipanggil ke session chat \ud83d\ude0a.')
+    await tgAnswerCallbackQuery(env, cqId, 'Baik, panggilan dibatalkan.', false)
+    await tgSendMessage(env, chatId, 'Baik kak, Admin tidak dipanggil ke session chat 😊.')
     return
   }
 
   if (data.startsWith('acceptcallyes_')) {
+    const callerLock = 'staffcall_' + fromId
+    if (!(await acquireLock(env, callerLock, 30))) { await tgAnswerCallbackQuery(env, cqId, '⏳ Tunggu sebentar sebelum memanggil lagi.', true); return }
+    await tgAnswerCallbackQuery(env, cqId, '📞 Memanggil admin...', false)
     const userId = data.replace('acceptcallyes_', '')
     if (String(userId) === String(OwnerID)) {
       await tgSendMessage(env, chatId, 'Owner tidak dapat message ke diri sendiri.')
@@ -442,10 +473,11 @@ async function handleCallbackQuery(env, cq) {
     if (!orderState) { await tgAnswerCallbackQuery(env, cqId, 'Sesi order tidak ditemukan.', true); return }
     const produk = await readJSON(env, 'Produk', [])
     const p = produk.find(pr => String(pr.id) === String(productId))
-    if (!p) return
+    if (!p) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Produk tidak ditemukan.', true); return }
     const stockCount = p.stok ? p.stok.length : 0
     if (stockCount === 0) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Stok produk ini sedang KOSONG.', true); return }
-    const maxQty = Math.max(1, stockCount)
+    // Cap 50: confirm_ menolak qty > 50, jadi increase_ tidak boleh lewat 50
+    const maxQty = Math.min(50, Math.max(1, stockCount))
     const current = orderState.jumlahPesanan || 1
     const requested = current + delta
     let next = requested
@@ -478,10 +510,10 @@ async function handleCallbackQuery(env, cq) {
   if (data.startsWith('refresh_')) {
     const productId = data.replace('refresh_', '')
     const orderState = await readJSON(env, 'orderState_' + fromId, null)
-    if (!orderState) return
+    if (!orderState) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Sesi order tidak ditemukan.', true); return }
     const produk = await readJSON(env, 'Produk', [])
     const p = produk.find(pr => String(pr.id) === String(productId))
-    if (!p) return
+    if (!p) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Produk tidak ditemukan.', true); return }
     const stockCount = p.stok ? p.stok.length : 0
     if (orderState.jumlahPesanan > stockCount) orderState.jumlahPesanan = Math.max(1, stockCount)
     orderState.stock_count = stockCount
@@ -580,13 +612,17 @@ async function handleCallbackQuery(env, cq) {
     const saldoLock = 'pay_saldo_' + fromId
     const sLocked = await acquireLock(env, saldoLock, 8)
     if (!sLocked) { await tgAnswerCallbackQuery(env, cqId, '⏳ Sedang diproses...', true); return }
+    // Product-level lock: cegah 2 user checkout stok terakhir bersamaan
+    const stockLock = 'pay_stock_' + psProductId
+    const gLocked = await acquireLock(env, stockLock, 10)
+    if (!gLocked) { await releaseLock(env, saldoLock); await tgAnswerCallbackQuery(env, cqId, '⏳ Stok sedang diproses user lain, coba lagi.', true); return }
     try {
       const os = await readJSON(env, 'orderState_' + fromId, null)
-      if (!os) { await releaseLock(env, saldoLock); await tgSendMessage(env, chatId, '⚠️ Sesi habis. Mulai ulang.'); return }
-      if (os.userId !== undefined && String(os.userId) !== String(fromId)) { await releaseLock(env, saldoLock); return }
+      if (!os) { await releaseLock(env, saldoLock); await releaseLock(env, stockLock); await tgSendMessage(env, chatId, '⚠️ Sesi habis. Mulai ulang.'); return }
+      if (os.userId !== undefined && String(os.userId) !== String(fromId)) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan sesi Anda.', true); await releaseLock(env, saldoLock); await releaseLock(env, stockLock); return }
       const allP = await readJSON(env, 'Produk', [])
       const prod = allP.find(pr => String(pr.id) === String(psProductId))
-      if (!prod) { await releaseLock(env, saldoLock); await tgSendMessage(env, chatId, '❌ Produk tidak ditemukan.'); return }
+      if (!prod) { await releaseLock(env, saldoLock); await releaseLock(env, stockLock); await tgSendMessage(env, chatId, '❌ Produk tidak ditemukan.'); return }
       const jml = psJumlah || os.jumlahPesanan || 1
       const tot = (os.price || prod.price) * jml
       if (!prod.stok || prod.stok.length < jml) {
@@ -596,11 +632,11 @@ async function handleCallbackQuery(env, cq) {
           produk: os.produk || '-', varian: os.varian || '-', total: tot,
           reason: 'Stok habis'
         })
-        await releaseLock(env, saldoLock); await tgSendMessage(env, chatId, '❌ Stok habis saat proses pembayaran.'); return
+        await releaseLock(env, saldoLock); await releaseLock(env, stockLock); await tgSendMessage(env, chatId, '❌ Stok habis saat proses pembayaran.'); return
       }
       const newBal = await minSaldo(env, fromId, tot)
       if (newBal === null) {
-        await releaseLock(env, saldoLock); await tgSendMessage(env, chatId, '❌ Saldo tidak cukup.'); return
+        await releaseLock(env, saldoLock); await releaseLock(env, stockLock); await tgSendMessage(env, chatId, '❌ Saldo tidak cukup.'); return
       }
       const freshP = await readJSON(env, 'Produk', [])
       const pFresh = freshP.find(pr => String(pr.id) === String(psProductId))
@@ -612,7 +648,7 @@ async function handleCallbackQuery(env, cq) {
           reason: 'Stok habis'
         })
         await minSaldo(env, fromId, -tot)
-        await releaseLock(env, saldoLock); await tgSendMessage(env, chatId, '❌ Stok habis. Saldo dikembalikan.'); return
+        await releaseLock(env, saldoLock); await releaseLock(env, stockLock); await tgSendMessage(env, chatId, '❌ Stok habis. Saldo dikembalikan.'); return
       }
       const taken = pFresh.stok.splice(0, jml)
       await writeJSON(env, 'Produk', freshP)
@@ -668,7 +704,8 @@ async function handleCallbackQuery(env, cq) {
         fileName: trxId + '.txt'
       })
       await releaseLock(env, saldoLock)
-    } catch(e) { await releaseLock(env, saldoLock); await tgSendMessage(env, chatId, '❌ Error saldo: ' + e.message) }
+      await releaseLock(env, stockLock)
+    } catch(e) { await releaseLock(env, saldoLock); await releaseLock(env, stockLock); await tgSendMessage(env, chatId, '❌ Error saldo: ' + e.message) }
     return
   }
 
@@ -684,7 +721,7 @@ async function handleCallbackQuery(env, cq) {
     try {
       const os2 = await readJSON(env, 'orderState_' + fromId, null)
       if (!os2) { await releaseLock(env, qrisLock); await tgSendMessage(env, chatId, '⚠️ Sesi habis. Mulai ulang.'); return }
-      if (os2.userId !== undefined && String(os2.userId) !== String(fromId)) { await releaseLock(env, qrisLock); return }
+      if (os2.userId !== undefined && String(os2.userId) !== String(fromId)) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan sesi Anda.', true); await releaseLock(env, qrisLock); return }
       const allP2 = await readJSON(env, 'Produk', [])
       const prod2 = allP2.find(pr => String(pr.id) === String(pqProductId))
       if (!prod2) { await releaseLock(env, qrisLock); await tgSendMessage(env, chatId, '❌ Produk tidak ditemukan.'); return }
@@ -862,6 +899,7 @@ async function handleCallbackQuery(env, cq) {
       }
       const payQ = createdQ.payment
       const paymentNumber = payQ.payment_number || ''
+      // Session pakai total_payment API (sama dgn caption) — compare via amountsMatch (toleransi Rp1)
       const displayTotal = Number(payQ.total_payment || chargeAmt)
       const isQrisQ = (gwQ.method || 'qris') === 'qris'
       os2.jumlahPesanan = jml2; os2.totalPrice = tot2; os2.payment_method = 'Pakasir:' + (gwQ.method || 'qris'); os2.userId = fromId; os2.trxId = trxId2
@@ -914,9 +952,9 @@ async function handleCallbackQuery(env, cq) {
         depositDetails: {
           userId: fromId, type: 'purchase', id: Number(pqProductId),
           cart: jml2, produk: os2.produk, produk_nama: os2.varian,
-          total_amount: chargeAmt, expired: expiredTime(), key: qMsgKey,
+          total_amount: displayTotal, expired: expiredTime(), key: qMsgKey,
           nama: fromName, username: fromUsername,
-          provider: 'pakasir', pakasir_amount: chargeAmt, pakasir_method: gwQ.method,
+          provider: 'pakasir', pakasir_amount: displayTotal, pakasir_method: gwQ.method,
           pakasir_gw: { slug: gwQ.slug, apiKey: gwQ.apiKey, method: gwQ.method, mode: gwQ.mode },
           display_total: displayTotal,
           // v9update18: flash sale metadata (utk auto-cancel di processPaymentSuccess)
@@ -966,6 +1004,7 @@ async function handleCallbackQuery(env, cq) {
     const smSession = smSessions.find(s => s.id === smTrxId)
     if (!smSession) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Sesi tidak ditemukan.', true); return }
     const smDetails = smSession.depositDetails
+    if (!smDetails || String(smDetails.userId) !== String(fromId)) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan sesi Anda.', true); return }
     // ─── Duitku branch: self-settle di sandbox ───
     if (smDetails.provider === 'duitku' && smDetails.duitku_gw && smDetails.duitku_gw.mode === 'sandbox') {
       await writeJSON(env, 'SessionDeposit', smSessions.filter(s => s.id !== smTrxId))
@@ -1011,6 +1050,10 @@ async function handleCallbackQuery(env, cq) {
         return
       }
       const ckDetails = ckSession.depositDetails
+      if (!ckDetails || String(ckDetails.userId) !== String(fromId)) {
+        await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan sesi Anda.', true)
+        return
+      }
       try {
         const expiredDate = parseExpiredWIB(ckDetails.expired)
         if (new Date() > expiredDate) {
@@ -1029,11 +1072,18 @@ async function handleCallbackQuery(env, cq) {
         return
       }
       let ckOk = false
+      const { amountsMatch } = await import('./pakasir.js')
       // ─── Saweria branch: cek via status ───
       if (ckDetails.provider === 'saweria' && ckDetails.saweria_id) {
         const { saweriaStatus } = await import('./saweria.js')
         const stat = await saweriaStatus(null, ckDetails.saweria_id)
         if (stat && stat.ok && stat.status === 'PAID') {
+          if (stat.amount === undefined) {
+            console.warn('[cekbayar] Saweria PAID tanpa nominal, terima berdasar session: ' + ckTrxId)
+          } else if (Number(stat.amount) !== Number(ckDetails.total_amount)) {
+            await tgAnswerCallbackQuery(env, cqId, '⚠️ Nominal tidak cocok. Hubungi admin.', true)
+            return
+          }
           await writeJSON(env, 'SessionDeposit', ckSessions.filter(s => s.id !== ckTrxId))
           const { processPaymentSuccess } = await import('./payments.js')
           await processPaymentSuccess(env, ckSession, {
@@ -1048,6 +1098,10 @@ async function handleCallbackQuery(env, cq) {
         const { duitkuStatus } = await import('./duitku.js')
         const stat = await duitkuStatus(ckDetails.duitku_gw, ckTrxId)
         if (stat && String(stat.statusCode) === '00') {
+          if (stat.amount !== undefined && stat.amount !== null && Number(stat.amount) !== Number(ckDetails.duitku_amount)) {
+            await tgAnswerCallbackQuery(env, cqId, '⚠️ Nominal tidak cocok. Hubungi admin.', true)
+            return
+          }
           await writeJSON(env, 'SessionDeposit', ckSessions.filter(s => s.id !== ckTrxId))
           const { processPaymentSuccess } = await import('./payments.js')
           await processPaymentSuccess(env, ckSession, {
@@ -1060,6 +1114,10 @@ async function handleCallbackQuery(env, cq) {
       if (ckDetails.provider === 'pakasir' && ckDetails.pakasir_gw) {
         const ckTrx = await pakasirDetail(ckDetails.pakasir_gw, ckTrxId, ckDetails.pakasir_amount)
         if (ckTrx && ckTrx.status === 'completed') {
+          if (!amountsMatch(ckTrx.total_payment ?? ckDetails.pakasir_amount, ckDetails.pakasir_amount)) {
+            await tgAnswerCallbackQuery(env, cqId, '⚠️ Nominal tidak cocok. Hubungi admin.', true)
+            return
+          }
           await writeJSON(env, 'SessionDeposit', ckSessions.filter(s => s.id !== ckTrxId))
           const { processPaymentSuccess } = await import('./payments.js')
           await processPaymentSuccess(env, ckSession, ckTrx)
@@ -1084,7 +1142,7 @@ async function handleCallbackQuery(env, cq) {
     const myTrx = allTrx.filter(t => String(t.user_id) === String(fromId))
     const PER_PAGE = 5
     const totalPg = Math.ceil(myTrx.length / PER_PAGE)
-    if (rwPage < 1 || rwPage > totalPg) return
+    if (rwPage < 1 || rwPage > totalPg) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Halaman tidak tersedia.', true); return }
     const { buildRiwayatView } = await import('./messages.js')
     const view = buildRiwayatView(myTrx, rwPage, totalPg)
     await editCard(env, cq, view.text, view.keyboard, view.parseMode || 'Markdown')

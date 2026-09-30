@@ -121,6 +121,14 @@ function methodLabel(m) {
   return METHOD_LABELS[m] || (m || 'QRIS')
 }
 
+// amountsMatch: true bila selisih absolut <= 2. Toleransi pembulatan Rp1
+// antara calcFee (Math.round) dan total_payment API Pakasir.
+// Dipakai di webhook compare Pakasir SAJA — BUKAN gateway lain
+// (Duitku strict, Saweria strict-bila-ada).
+function amountsMatch(a, b) {
+  return Math.abs(Number(a) - Number(b)) <= 2
+}
+
 function qrImageUrl(qrString) {
   return 'https://quickchart.io/qr?text=' + encodeURIComponent(qrString) + '&size=400'
 }
@@ -185,6 +193,6 @@ async function pakasirSimulate(gw, orderId, amount) {
 export {
   PAKASIR_BASE, PAYMENT_METHODS, METHOD_LABELS, defaultPayCfg,
   getPayCfg, savePayCfg, getGateway, pakasirConfigured, getActiveGateway,
-  calcFee, feeLabel, methodLabel, qrImageUrl,
+  calcFee, feeLabel, methodLabel, amountsMatch, qrImageUrl,
   pakasirCreate, pakasirDetail, pakasirCancel, pakasirSimulate
 }

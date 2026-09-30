@@ -330,6 +330,12 @@ async function handleCommand(env, msg) {
       return
     }
     const { redeemVoucher } = await import('./user.js')
+    const { getUser } = await import('./user.js')
+    const reg = await getUser(env, fromId)
+    if (!reg) {
+      await tgSendMessage(env, chatId, '👋 Silakan tekan /start terlebih dahulu, lalu redeem ulang kodenya.')
+      return
+    }
     const result = await redeemVoucher(env, fromId, kode)
     if (result.ok) {
       const oldBal = result.newBalance - result.amount

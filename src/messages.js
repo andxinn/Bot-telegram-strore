@@ -475,40 +475,27 @@ function buildProductListView(kategori, page) {
   return { caption: cap, keyboard: { inline_keyboard: rows } }
 }
 
-function shortRp(n) {
-  n = Number(n) || 0
-  if (n >= 1000000) return String(+(n / 1000000).toFixed(1)).replace('.', ',') + 'jt'
-  if (n >= 1000) return Math.round(n / 1000) + 'rb'
-  return String(n)
-}
-
-function buildVariantView(kat, variants, fsMap = {}) {
-  // v9update18: fsMap = { [variantId]: { salePrice, originalPrice, discountPercent, expiresAt } }
-  // Opsi 3: caption tabel ringkas, tombol bawa harga; stok habis = tombol noop.
-  let cap = '╭───〔 ☰ ' + mdSafe(kat.produkName) + ' 〕\n'
-  if (kat.desc) cap += '│ ' + mdSafe(String(kat.desc)) + '\n'
-  cap += '│ ID │ Varian │ Harga │ Stok │\n'
+function buildVariantView(kat, variants, fsMap = {}, sold = 0) {
+  // Layout ala referensi: pill header, Terjual (dihitung dari Trx), baris bold
+  // "*Nama: Rp. X | Stok: N*", footer refresh, tombol nama varian full-width.
+  const katName = mdSafe(kat.produkName)
+  let cap = '[DETAIL PRODUK "' + katName + '"]\n'
+  cap += 'Produk:\n'
+  cap += '*' + katName + '*\n'
+  cap += 'Terjual: *' + (Number(sold) || 0).toLocaleString('id-ID') + '*\n'
+  cap += '[VARIASI & HARGA "' + katName + '"]\n'
   variants.forEach(v => {
     const st = v.stok ? v.stok.length : 0
     const fs = fsMap[String(v.id)]
-    const priceTxt = fs
-      ? '~' + (v.price || 0).toLocaleString('id-ID') + '~ ' + Number(fs.salePrice).toLocaleString('id-ID')
-      : (v.price || 0).toLocaleString('id-ID')
-    const stockTxt = st === 0 ? 'Habis' : st + ' ✓'
-    cap += '│ ' + v.id + ' │ ' + mdSafe(v.nameproduct) + ' │ ' + priceTxt + ' │ ' + stockTxt + ' │\n'
+    const effPrice = fs ? Number(fs.salePrice) : (v.price || 0)
+    cap += '*' + mdSafe(v.nameproduct) + ': Rp. ' + effPrice.toLocaleString('id-ID') + ' | Stok: ' + st + '*\n'
   })
-  cap += '╰───────────────────────\nPilih varian di bawah 👇'
+  cap += '_Refresh at ' + getTanggalJam().jam + ' WIB_'
   const rows = []
   for (const v of variants) {
-    const st = v.stok ? v.stok.length : 0
     const fs = fsMap[String(v.id)]
     const prefix = fs ? '✧ ' : ''
-    if (st === 0) {
-      rows.push([{ text: prefix + '[' + v.id + '] ' + v.nameproduct + ' · Habis', callback_data: 'noop' }])
-    } else {
-      const price = fs ? fs.salePrice : (v.price || 0)
-      rows.push([{ text: prefix + '[' + v.id + '] ' + v.nameproduct + ' · Rp' + shortRp(price), callback_data: 'dpi_' + v.id }])
-    }
+    rows.push([{ text: prefix + v.nameproduct, callback_data: 'dpi_' + v.id }])
   }
   rows.push([{ text: '🔙 Kembali', callback_data: 'back_to_list' }])
   return { caption: cap, keyboard: { inline_keyboard: rows } }
@@ -596,7 +583,9 @@ async function showVariants(env, chatId, kategoriId, fromId) {
     const _fs = fsAll[String(_v.id)]
     if (_fs && _fs.expiresAt && _nowFs < Number(_fs.expiresAt)) fsMap[String(_v.id)] = _fs
   }
-  const view = buildVariantView(kat, variants, fsMap)
+  const trxAll = await readJSON(env, 'Trx', [])
+  const sold = trxAll.filter(t => t.status === 'Lunas' && String(t.produk) === String(kat.produkName)).reduce((a, t) => a + (Number(t.jumlah) || 0), 0)
+  const view = buildVariantView(kat, variants, fsMap, sold)
   await sendBannerCard(env, chatId, view.caption, view.keyboard, fromId)
 }
 

@@ -332,7 +332,16 @@ async function handleCallbackQuery(env, cq) {
     const variants = produk.filter(pr => pr.category === kat.produkId)
     if (variants.length === 0) { await tgAnswerCallbackQuery(env, cqId, 'Belum ada varian.', true); return }
     const { buildVariantView } = await import('./messages.js')
-    const view = buildVariantView(kat, variants)
+    const fsAll = await readJSON(env, 'FlashSale', {})
+    const nowFs = Date.now()
+    const fsMap = {}
+    for (const vv of variants) {
+      const f = fsAll[String(vv.id)]
+      if (f && f.expiresAt && nowFs < Number(f.expiresAt)) fsMap[String(vv.id)] = f
+    }
+    const trxAll = await readJSON(env, 'Trx', [])
+    const sold = trxAll.filter(t => t.status === 'Lunas' && String(t.produk) === String(kat.produkName)).reduce((a, t) => a + (Number(t.jumlah) || 0), 0)
+    const view = buildVariantView(kat, variants, fsMap, sold)
     await editCard(env, cq, view.caption, view.keyboard)
     return
   }
@@ -458,7 +467,16 @@ async function handleCallbackQuery(env, cq) {
     const produk = await readJSON(env, 'Produk', [])
     const variants = produk.filter(pr => pr.category === kat.produkId)
     const { buildVariantView } = await import('./messages.js')
-    const view = buildVariantView(kat, variants)
+    const fsAll = await readJSON(env, 'FlashSale', {})
+    const nowFs = Date.now()
+    const fsMap = {}
+    for (const vv of variants) {
+      const f = fsAll[String(vv.id)]
+      if (f && f.expiresAt && nowFs < Number(f.expiresAt)) fsMap[String(vv.id)] = f
+    }
+    const trxAll = await readJSON(env, 'Trx', [])
+    const sold = trxAll.filter(t => t.status === 'Lunas' && String(t.produk) === String(kat.produkName)).reduce((a, t) => a + (Number(t.jumlah) || 0), 0)
+    const view = buildVariantView(kat, variants, fsMap, sold)
     await editCard(env, cq, view.caption, view.keyboard)
     return
   }

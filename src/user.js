@@ -1,4 +1,4 @@
-import { readJSON, writeJSON } from './kv.js'
+import { readJSON, writeJSON, writeText, deleteKey, existsKey } from './kv.js'
 import { OwnerID } from './config.js'
 
 async function getUserList(env) {
@@ -124,14 +124,13 @@ async function delBan(env, sender) {
 // --- Action Lock System: cegah double-submit ---
 async function acquireLock(env, key, ttlSeconds = 5) {
   const lockKey = 'lock_' + key
-  const existing = await env.DB.get(lockKey)
-  if (existing !== null) return false
-  await env.DB.put(lockKey, '1', { expirationTtl: ttlSeconds })
+  if (await existsKey(env, lockKey)) return false
+  await writeText(env, lockKey, '1', { expirationTtl: ttlSeconds })
   return true
 }
 
 async function releaseLock(env, key) {
-  try { await env.DB.delete('lock_' + key) } catch (e) {}
+  try { await deleteKey(env, 'lock_' + key) } catch (e) {}
 }
 
 // ─── v9update17: Voucher redeem helper (atomic via lock + claim-verify) ───

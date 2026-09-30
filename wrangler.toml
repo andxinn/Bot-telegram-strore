@@ -4,6 +4,10 @@ compatibility_date = "2024-01-01"
 
 [vars]
 MODE = "production"
+# DB_MODE: auto (ikut setting bot) | kv (paksa lokal/CF-KV) | turso (paksa Turso).
+# Kredensial Turso sebaiknya via panel bot (Settings → Kelola Database),
+# tapi bisa juga via secret: wrangler secret put TURSO_URL / TURSO_TOKEN
+DB_MODE = "auto"
 
 [[kv_namespaces]]
 binding = "DB"

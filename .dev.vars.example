@@ -27,6 +27,16 @@ CS=
 # development | production  (dev-server override ke 'development' otomatis)
 MODE=development
 
+# --- Database backend ---
+# auto = ikut setting bot (Admin → Settings → Kelola Database)
+# kv = paksa lokal (dev-db.json) | turso = paksa Turso
+DB_MODE=auto
+
+# Opsional: kredensial Turso via env (menang atas setting bot).
+# Cara utama tetap via bot: Admin → Settings → Kelola Database → Set URL/Token.
+#TURSO_URL=libsql://xxx.turso.io
+#TURSO_TOKEN=
+
 # 'true' = semua payment langsung sukses (skip Pakasir sama sekali)
 SIMULATE_PAYMENT=false
 SIMULATE_DELAY=5

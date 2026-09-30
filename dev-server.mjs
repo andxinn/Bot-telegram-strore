@@ -76,6 +76,8 @@ class LocalKV {
 }
 
 env.DB = new LocalKV(path.join(__dirname, 'dev-db.json'))
+const { initDb } = await import('./src/db.js')
+await initDb(env)
 
 // Force dev mode indicator
 env.MODE = env.MODE || 'development'
@@ -87,29 +89,37 @@ const worker = await import('./src/index.js')
 // ─── Dev-only HTTP handlers ─────────────────────────────────────────────
 async function handleDevRoute(req, res, url, body) {
   const p = url.pathname
-  // GET /dev/kv         → list semua key
+  // GET /dev/kv         → list semua key (backend AKTIF: lokal atau Turso)
   if (p === '/dev/kv' && req.method === 'GET') {
-    const keys = Object.keys(env.DB.data).sort()
-    return json(res, 200, { count: keys.length, keys })
+    const { dbList, getDbInfo } = await import('./src/db.js')
+    const keys = (await dbList(env, '')).sort()
+    return json(res, 200, { ...(await getDbInfo(env)), count: keys.length, keys })
   }
-  // GET /dev/kv/:key    → isi key
+  // GET /dev/kv/:key    → isi key (backend aktif, raw tanpa envelope)
   if (p.startsWith('/dev/kv/') && req.method === 'GET') {
     const key = decodeURIComponent(p.replace('/dev/kv/', ''))
-    if (!(key in env.DB.data)) return json(res, 404, { error: 'not_found', key })
-    return json(res, 200, { key, value: env.DB.data[key] })
+    const { dbGetRaw } = await import('./src/db.js')
+    const raw = await dbGetRaw(env, key)
+    if (raw === null) return json(res, 404, { error: 'not_found', key })
+    let value
+    try { value = JSON.parse(raw) } catch { value = raw }
+    return json(res, 200, { key, value })
   }
   // POST /dev/kv/:key   → set value (body = JSON apa saja)
   if (p.startsWith('/dev/kv/') && req.method === 'POST') {
     const key = decodeURIComponent(p.replace('/dev/kv/', ''))
     let val
     try { val = JSON.parse(body || 'null') } catch { return json(res, 400, { error: 'invalid_json' }) }
-    env.DB.data[key] = val; env.DB.save()
+    const raw = typeof val === 'string' ? val : JSON.stringify(val)
+    const { dbPutRaw } = await import('./src/db.js')
+    await dbPutRaw(env, key, raw)
     return json(res, 200, { ok: true, key })
   }
   // DELETE /dev/kv/:key → hapus key
   if (p.startsWith('/dev/kv/') && req.method === 'DELETE') {
     const key = decodeURIComponent(p.replace('/dev/kv/', ''))
-    delete env.DB.data[key]; env.DB.save()
+    const { dbDelete } = await import('./src/db.js')
+    await dbDelete(env, key)
     return json(res, 200, { ok: true, key })
   }
   // POST /dev/simulate-pakasir-webhook  → kirim payload webhook palsu ke /pakasir-webhook
@@ -118,7 +128,8 @@ async function handleDevRoute(req, res, url, body) {
     try { payload = JSON.parse(body || '{}') } catch { return json(res, 400, { error: 'invalid_json' }) }
     // Cari session pending terakhir kalau tidak dikirim order_id
     if (!payload.order_id) {
-      const sessions = env.DB.data['SessionDeposit'] || []
+      const { readJSON: readJ1 } = await import('./src/kv.js')
+      const sessions = await readJ1(env, 'SessionDeposit', [])
       const pending = sessions.filter(s => s.status === 'pending' && s.depositDetails?.provider === 'pakasir').pop()
       if (!pending) return json(res, 400, { error: 'no_pending_pakasir_session' })
       payload.order_id = pending.id
@@ -143,7 +154,8 @@ async function handleDevRoute(req, res, url, body) {
     let payload
     try { payload = JSON.parse(body || '{}') } catch { return json(res, 400, { error: 'invalid_json' }) }
     if (!payload.merchantOrderId) {
-      const sessions = env.DB.data['SessionDeposit'] || []
+      const { readJSON: readJ2 } = await import('./src/kv.js')
+      const sessions = await readJ2(env, 'SessionDeposit', [])
       const pending = sessions.filter(s => s.status === 'pending' && s.depositDetails?.provider === 'duitku').pop()
       if (!pending) return json(res, 400, { error: 'no_pending_duitku_session' })
       payload.merchantOrderId = pending.id
@@ -153,7 +165,8 @@ async function handleDevRoute(req, res, url, body) {
     }
     payload.resultCode = payload.resultCode || '00'
     // Sign HMAC-SHA256 hex lowercase (merchantCode + amount + merchantOrderId, apiKey)
-    const cfg = env.DB.data['BotConfig'] || {}
+    const { readJSON: readJ3 } = await import('./src/kv.js')
+    const cfg = await readJ3(env, 'BotConfig', {})
     const apiKey = cfg?.payment?.gateways?.duitku?.apiKey || ''
     if (!apiKey) return json(res, 400, { error: 'duitku_apikey_not_set' })
     const { createHmac } = await import('node:crypto')
@@ -175,8 +188,10 @@ async function handleDevRoute(req, res, url, body) {
   }
   // GET /dev/info → info dev server
   if (p === '/dev/info' && req.method === 'GET') {
+    const { dbCount: devCount, getDbInfo: devInfo } = await import('./src/db.js')
     return json(res, 200, {
-      mode: env.MODE, bot_username: BOT_INFO.username, kv_keys: Object.keys(env.DB.data).length,
+      ...(await devInfo(env)),
+      mode: env.MODE, bot_username: BOT_INFO.username, kv_keys: await devCount(env, 'kv'),
       polling: polling, offset, port: PORT,
       pakasir_webhook_url: 'http://localhost:' + PORT + '/pakasir-webhook',
       pakasir_simulate_url: 'http://localhost:' + PORT + '/dev/simulate-pakasir-webhook',

@@ -1,3 +1,4 @@
+import { initDb } from './db.js'
 import { initConfig, Mode } from './config.js'
 import { tgSendMessage, tgSetMyCommands } from './telegram.js'
 import { handleMessage } from './messages.js'
@@ -120,6 +121,7 @@ async function setupWebhook(env, url) {
 
 export default {
   async fetch(request, env, ctx) {
+    await initDb(env)
     await initConfig(env)
     const url = new URL(request.url)
 
@@ -198,6 +200,7 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    await initDb(env)
     await initConfig(env)
     if (event.cron === '* * * * *') {
       ctx.waitUntil(checkPendingPayments(env))

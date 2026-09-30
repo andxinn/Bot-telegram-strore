@@ -376,9 +376,9 @@ function buildLoadingText(percent) {
 }
 
 // Kirim teks dengan aman: kalau Markdown gagal di-parse, ulangi tanpa Markdown.
-async function safeSendText(env, chatId, text, keyboard) {
+async function safeSendText(env, chatId, text, keyboard, parseMode = 'Markdown') {
   let r = null
-  try { r = await tgSendMessage(env, chatId, text, keyboard) } catch (e) { r = null }
+  try { r = await tgSendMessage(env, chatId, text, keyboard, parseMode) } catch (e) { r = null }
   if (r && r.ok) return r
   try { return await tgSendMessage(env, chatId, text, keyboard, '') } catch (e) { return r }
 }
@@ -386,14 +386,14 @@ async function safeSendText(env, chatId, text, keyboard) {
 // - Pakai banner foto bila ada DAN caption <= 1000 char (batas caption foto 1024)
 // - Kalau foto gagal / caption panjang / Markdown error -> fallback ke teks biasa
 // Dengan begini kartu TIDAK PERNAH macet di "10%".
-async function sendFinalCard(env, chatId, caption, keyboard, useBanner, customBannerB64 = null) {
+async function sendFinalCard(env, chatId, caption, keyboard, useBanner, customBannerB64 = null, parseMode = 'Markdown') {
   const activeBanner = customBannerB64 || bannerListB64
   const hasBanner = (activeBanner && activeBanner.length > 50) || (BannerFileId && BannerFileId !== '-')
   if (useBanner && hasBanner && caption.length <= 1000) {
     let sent = null
     try {
-      if (activeBanner && activeBanner.length > 50) sent = await tgSendPhotoBase64(env, chatId, activeBanner, caption, keyboard)
-      else sent = await tgSendPhotoFile(env, chatId, BannerFileId, caption, keyboard)
+      if (activeBanner && activeBanner.length > 50) sent = await tgSendPhotoBase64(env, chatId, activeBanner, caption, keyboard, parseMode)
+      else sent = await tgSendPhotoFile(env, chatId, BannerFileId, caption, keyboard, parseMode)
     } catch (e) { sent = null }
     if (sent && sent.ok && sent.result && sent.result.message_id) return sent.result.message_id
     // Foto gagal (mis. Markdown) -> coba lagi tanpa Markdown
@@ -403,7 +403,7 @@ async function sendFinalCard(env, chatId, caption, keyboard, useBanner, customBa
     } catch (e) { sent = null }
     if (sent && sent.ok && sent.result && sent.result.message_id) return sent.result.message_id
   }
-  const t = await safeSendText(env, chatId, caption, keyboard)
+  const t = await safeSendText(env, chatId, caption, keyboard, parseMode)
   return (t && t.result) ? t.result.message_id : null
 }
 
@@ -411,7 +411,7 @@ async function sendFinalCard(env, chatId, caption, keyboard, useBanner, customBa
 // Loading ditampilkan sebagai PESAN TEKS (edit teks paling andal), lalu kartu
 // final dikirim sebagai pesan baru dan pesan loading dihapus. Tidak ada lagi
 // edit caption foto yang rapuh, jadi tidak pernah berhenti di "10%".
-async function sendCardWithLoading(env, chatId, caption, keyboard, useBanner, fromId, customBannerB64 = null) {
+async function sendCardWithLoading(env, chatId, caption, keyboard, useBanner, fromId, customBannerB64 = null, parseMode = 'Markdown') {
   // Single-card flow: hapus kartu flow sebelumnya agar pesan tidak menumpuk
   if (fromId) {
     const prev = await readJSON(env, 'flowMsg_' + fromId, null)
@@ -431,7 +431,7 @@ async function sendCardWithLoading(env, chatId, caption, keyboard, useBanner, fr
     }
   }
   // 3) Setelah loading 100%, kirim kartu final (foto + list produk) sebagai pesan baru
-  const finalMid = await sendFinalCard(env, chatId, caption, keyboard, useBanner, customBannerB64)
+  const finalMid = await sendFinalCard(env, chatId, caption, keyboard, useBanner, customBannerB64, parseMode)
   // 4) Hapus pesan loading -> tinggal foto + list produk yang tampil
   if (loadingMid) { try { await tgDeleteMessage(env, chatId, loadingMid) } catch (e) {} }
   if (fromId && finalMid) await writeJSON(env, 'flowMsg_' + fromId, finalMid)
@@ -445,8 +445,8 @@ async function sendBannerCard(env, chatId, caption, keyboard, fromId) {
   return await sendCardWithLoading(env, chatId, caption, keyboard, true, fromId)
 }
 
-async function sendTextCard(env, chatId, caption, keyboard, fromId) {
-  return await sendCardWithLoading(env, chatId, caption, keyboard, false, fromId)
+async function sendTextCard(env, chatId, caption, keyboard, fromId, parseMode = 'Markdown') {
+  return await sendCardWithLoading(env, chatId, caption, keyboard, false, fromId, null, parseMode)
 }
 
 function buildProductListView(kategori, page) {
@@ -476,18 +476,24 @@ function buildProductListView(kategori, page) {
 }
 
 function buildVariantView(kat, variants, fsMap = {}, sold = 0) {
-  // Layout ala referensi: pill header, Terjual (dihitung dari Trx), baris bold
-  // "*Nama: Rp. X | Stok: N*", footer refresh, tombol nama varian full-width.
-  let cap = '*DETAIL PRODUK*\n'
-  cap += 'Terjual: *' + (Number(sold) || 0).toLocaleString('id-ID') + '*\n\n'
-  cap += '*[VARIASI & HARGA]*\n'
+  // Layout ala referensi (HTML + blockquote = garis teal kiri):
+  // pill DETAIL PRODUK + nama, Terjual agregat Trx Lunas, pill VARIASI & HARGA,
+  // baris "✱ Nama: Rp. X | Stok: N", footer refresh italic, tombol nama full-width.
+  const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const katName = esc(kat.produkName)
+  let cap = '<blockquote>DETAIL PRODUK\n'
+  cap += 'Produk:\n'
+  cap += '<b>' + katName + '</b></blockquote>\n'
+  cap += '\nTerjual: <b>' + (Number(sold) || 0).toLocaleString('id-ID') + '</b>\n'
+  cap += '\n<blockquote>VARIASI &amp; HARGA\n'
   variants.forEach(v => {
     const st = v.stok ? v.stok.length : 0
     const fs = fsMap[String(v.id)]
     const effPrice = fs ? Number(fs.salePrice) : (v.price || 0)
-    cap += '*' + mdSafe(v.nameproduct) + ': Rp. ' + effPrice.toLocaleString('id-ID') + ' | Stok: ' + st + '*\n'
+    cap += '✱ ' + esc(v.nameproduct) + ': Rp. ' + effPrice.toLocaleString('id-ID') + ' | Stok: <b>' + st + '</b>\n'
   })
-  cap += '\n_Refresh at ' + getTanggalJam().jam + ' WIB_'
+  cap += '</blockquote>\n'
+  cap += '\n<i>Refresh at ' + getTanggalJam().jam + ' WIB</i>'
   const rows = []
   for (const v of variants) {
     const fs = fsMap[String(v.id)]
@@ -495,7 +501,7 @@ function buildVariantView(kat, variants, fsMap = {}, sold = 0) {
     rows.push([{ text: prefix + v.nameproduct, callback_data: 'dpi_' + v.id }])
   }
   rows.push([{ text: '🔙 Kembali', callback_data: 'back_to_list' }])
-  return { caption: cap, keyboard: { inline_keyboard: rows } }
+  return { caption: cap, keyboard: { inline_keyboard: rows }, parseMode: 'HTML' }
 }
 
 function buildOrderView(os, p) {
@@ -583,7 +589,7 @@ async function showVariants(env, chatId, kategoriId, fromId) {
   const trxAll = await readJSON(env, 'Trx', [])
   const sold = trxAll.filter(t => t.status === 'Lunas' && String(t.produk) === String(kat.produkName)).reduce((a, t) => a + (Number(t.jumlah) || 0), 0)
   const view = buildVariantView(kat, variants, fsMap, sold)
-  await sendBannerCard(env, chatId, view.caption, view.keyboard, fromId)
+  await sendTextCard(env, chatId, view.caption, view.keyboard, fromId, view.parseMode)
 }
 
 async function showStockInfo(env, chatId) {

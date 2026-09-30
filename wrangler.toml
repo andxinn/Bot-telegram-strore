@@ -4,11 +4,23 @@ compatibility_date = "2024-01-01"
 
 [vars]
 MODE = "production"
-# DB_MODE: auto (ikut setting bot) | kv (paksa lokal/CF-KV) | turso (paksa Turso).
-# Kredensial Turso sebaiknya via panel bot (Settings → Kelola Database),
-# tapi bisa juga via secret: wrangler secret put TURSO_URL / TURSO_TOKEN
+# DB_MODE: auto (ikut setting bot: Admin → Sistem → Kelola Database)
+#   | kv (paksa lokal/CF-KV) | turso (paksa Turso).
+# Kredensial Turso sebaiknya via panel bot, tapi bisa juga via secret:
+#   wrangler secret put TURSO_URL / wrangler secret put TURSO_TOKEN
 DB_MODE = "auto"
+# Backup otomatis harian (WIB, 0-23). File .json dikirim ke CHANNEL_BACKUP.
+JAM_BACKUP = "6"
+# --- WAJIB diganti sebelum deploy (lihat SETUP.md langkah 4) ---
+# BOT_TOKEN, OWNER_ID, CHANNEL_LOG dsb = secret (sensitif):
+#   wrangler secret put BOT_TOKEN
+# NAMA_BOT, STORE_NAME, CS = [vars] biasa (non-sensitif), contoh:
+#NAMA_BOT = "Tehtarik Store"
+#STORE_NAME = "Tehtarik Store"
 
+# --- WAJIB: ganti dengan KV namespace asli sebelum deploy! ---
+# Cara buat: npx wrangler kv:namespace create DB
+# Lalu paste id yang keluar ke bawah ini.
 [[kv_namespaces]]
 binding = "DB"
 id = "your-kv-namespace-id"

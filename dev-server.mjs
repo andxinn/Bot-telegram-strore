@@ -29,6 +29,19 @@ const PORT = parseInt(process.env.DEV_PORT || '8787')
 const SNAP_DIR = path.join(__dirname, 'snapshots')
 if (!fs.existsSync(SNAP_DIR)) fs.mkdirSync(SNAP_DIR, { recursive: true })
 
+// Offset polling Telegram disimpan di file lokal (bukan di KV) agar tidak
+// ikut bocor ke migrasi/Turso. ponytail: JSON satu angka; pindah ke SQLite bila butuh histori.
+const OFFSET_FILE = path.join(__dirname, 'dev-offset.json')
+function loadOffset() {
+  try {
+    const n = Number(JSON.parse(fs.readFileSync(OFFSET_FILE, 'utf-8')))
+    return Number.isFinite(n) && n > 0 ? n : 0
+  } catch { return 0 }
+}
+function saveOffset(v) {
+  try { fs.writeFileSync(OFFSET_FILE, JSON.stringify(v)) } catch {}
+}
+
 // ─── Load env dari .dev.vars ────────────────────────────────────────────
 const env = {}
 const devVarsPath = path.join(__dirname, '.dev.vars')
@@ -302,11 +315,9 @@ let offset = 0
 async function setupPolling() {
   const BOT_TOKEN = env.BOT_TOKEN
   if (!BOT_TOKEN) return
-  // Restore offset
-  try {
-    const saved = env.DB.data['__DEV_POLL_OFFSET__']
-    if (typeof saved === 'number' && saved > 0) { offset = saved; console.log('  Resume polling offset: ' + offset) }
-  } catch {}
+  // Restore offset (file lokal, bukan KV)
+  offset = loadOffset()
+  if (offset > 0) console.log('  Resume polling offset: ' + offset)
   try {
     const delRes = await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/deleteWebhook', { method: 'POST' })
     const delData = await delRes.json()
@@ -377,9 +388,8 @@ async function pollUpdates() {
             if (err.stack) console.error(err.stack.split('\n').slice(0, 4).join('\n'))
           }
         }
-        // Persist offset
-        env.DB.data['__DEV_POLL_OFFSET__'] = offset
-        env.DB.save()
+        // Persist offset (file lokal, bukan KV)
+        saveOffset(offset)
       }
     } catch (err) {
       console.error('Polling network error:', err.message)

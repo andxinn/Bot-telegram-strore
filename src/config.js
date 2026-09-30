@@ -61,8 +61,6 @@ async function initConfig(env) {
       if (kvConfig.ChannelStore) ChannelStore = kvConfig.ChannelStore
       if (kvConfig.CS) CS = kvConfig.CS
       if (kvConfig.DataQris) DataQris = kvConfig.DataQris
-      if (kvConfig.OkeMerchantId) OkeMerchantId = kvConfig.OkeMerchantId
-      if (kvConfig.OkeSignature) OkeSignature = kvConfig.OkeSignature
       if (kvConfig.BannerFileId) BannerFileId = kvConfig.BannerFileId
       if (kvConfig.ButtonMenu) ButtonMenu = kvConfig.ButtonMenu
       if (kvConfig.bannerStartB64 !== undefined) bannerStartB64 = kvConfig.bannerStartB64

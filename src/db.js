@@ -5,9 +5,28 @@
 // Kredensial: env TURSO_URL/TURSO_TOKEN menang atas setting bot (BotConfig.db),
 // biar secret bisa di-rotate tanpa lewat chat. Setting via bot disimpan di BotConfig.db.
 // ponytail: single-table kv compat; upgrade ke skema relasional (db-schema.md) bila butuh query.
-let tursoClient = null
-let tursoKey = ''
-let tursoTableOk = false
+const tursoClients = new Map()
+
+function tursoEntry(url, token) {
+  const key = url + '|' + token
+  let e = tursoClients.get(key)
+  if (!e) { e = { client: null, tableOk: false }; tursoClients.set(key, e) }
+  return e
+}
+
+async function getTurso(env, url, token) {
+  const e = tursoEntry(url, token)
+  if (!e.client) {
+    const { createClient } = await import('@libsql/client/web')
+    e.client = createClient({ url, authToken: token || undefined })
+    e.tableOk = false
+  }
+  if (!e.tableOk) {
+    await e.client.execute('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)')
+    e.tableOk = true
+  }
+  return e.client
+}
 
 function botDbFromRaw(raw) {
   try { const o = JSON.parse(raw); return (o && o.db) || null } catch { return null }
@@ -26,7 +45,9 @@ function unwrap(stored) {
   if (typeof stored !== 'string') return { value: stored }
   try {
     const o = JSON.parse(stored)
-    if (o && typeof o === 'object' && '__exp' in o) {
+    if (o && typeof o === 'object' && !Array.isArray(o)
+      && Object.keys(o).length === 2 && '__exp' in o && '__v' in o
+      && typeof o.__exp === 'number' && Number.isFinite(o.__exp)) {
       if (Date.now() > Number(o.__exp)) return { value: null, expired: true }
       return { value: o.__v === undefined ? null : o.__v }
     }
@@ -35,9 +56,13 @@ function unwrap(stored) {
 }
 
 async function resolveDb(env) {
-  const force = String(env.DB_MODE || 'auto').toLowerCase()
+  const force = String(env.DB_MODE || 'auto').trim().toLowerCase()
   let botDb = null
-  try { botDb = botDbFromRaw(await env.DB.get('BotConfig')) } catch {}
+  try {
+    botDb = botDbFromRaw(await env.DB.get('BotConfig'))
+  } catch (e) {
+    return { backend: 'kv', client: null, mode: 'kv', force, degraded: true, dbError: e && e.message ? e.message : String(e) }
+  }
   const url = env.TURSO_URL || (botDb && botDb.url) || ''
   const token = env.TURSO_TOKEN || (botDb && botDb.token) || ''
   const wantTurso = force === 'turso' || (force !== 'kv' && botDb && botDb.mode === 'turso')
@@ -47,24 +72,44 @@ async function resolveDb(env) {
     return { backend: 'kv', client: null, mode: (botDb && botDb.mode) || 'kv', force, degraded: true }
   }
   try {
-    const key = url + '|' + token
-    if (!tursoClient || tursoKey !== key) {
-      const { createClient } = await import('@libsql/client/web')
-      tursoClient = createClient({ url, authToken: token || undefined })
-      tursoKey = key
-      tursoTableOk = false
-    }
-    if (!tursoTableOk) {
-      await tursoClient.execute('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)')
-      tursoTableOk = true
-    }
-    return { backend: 'turso', client: tursoClient, mode: 'turso', force, degraded: false,
+    const client = await getTurso(env, url, token)
+    return { backend: 'turso', client, mode: 'turso', force, degraded: false,
       urlHost: url.replace(/^(libsql|https?):\/\//, '').split(/[/:?]/)[0],
       hasToken: !!token, credSource: env.TURSO_URL ? 'env' : 'bot' }
   } catch (e) {
     console.error('[db] konek Turso gagal → fallback KV lokal:', e.message)
     return { backend: 'kv', client: null, mode: (botDb && botDb.mode) || 'kv', force, degraded: true, dbError: e.message }
   }
+}
+
+// Selector mode tinggal di KV lokal (BotConfig.db.mode). Tulis ke KEDUA backend
+// agar flip Turso↔KV menempel apa pun backend aktifnya; gagal satu sisi tidak fatal.
+async function saveDbMode(env, mode) {
+  let raw = null
+  try { raw = await env.DB.get('BotConfig') } catch (e) { console.error('[db] saveDbMode baca BotConfig gagal:', e.message) }
+  let cfg = {}
+  try { cfg = raw ? JSON.parse(raw) : {} } catch { cfg = {} }
+  if (!cfg || typeof cfg !== 'object') cfg = {}
+  cfg.db = { ...(cfg.db || {}), mode }
+  const out = JSON.stringify(cfg)
+  try { await env.DB.put('BotConfig', out) } catch (e) { console.error('[db] saveDbMode tulis KV gagal:', e.message) }
+  try {
+    const url = env.TURSO_URL || (cfg.db && cfg.db.url) || ''
+    const token = env.TURSO_TOKEN || (cfg.db && cfg.db.token) || ''
+    if (url) {
+      const client = await getTurso(env, url, token)
+      await client.execute({ sql: 'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', args: ['BotConfig', out] })
+    }
+  } catch (e) { console.error('[db] saveDbMode tulis Turso gagal:', e.message) }
+  try { if (env._db) env._db.mode = mode } catch {}
+  return true
+}
+
+async function getDbMode(env) {
+  try {
+    const botDb = botDbFromRaw(await env.DB.get('BotConfig'))
+    return (botDb && botDb.mode) || 'kv'
+  } catch { return 'kv' }
 }
 
 async function initDb(env) {
@@ -75,13 +120,27 @@ async function initDb(env) {
 function resetDbCache(env) { try { delete env._db } catch {} }
 async function cur(env) { return env._db || await initDb(env) }
 
+// Failover per-request: Turso gagal di tengah request → tandai degraded,
+// ulangi operasi itu di KV lokal. Request berikut initDb ulang dari selector.
+function failover(env, r, e) {
+  const msg = e && e.message ? e.message : String(e)
+  console.error('[db] Turso gagal tengah request → failover KV lokal:', msg)
+  env._db = { backend: 'kv', client: null, force: r.force || 'auto', degraded: true, dbError: msg }
+}
+async function kvGetRaw(env, key) {
+  const v = await env.DB.get(key)
+  return v === null || v === undefined ? null : (typeof v === 'string' ? v : JSON.stringify(v))
+}
+
 // ─── Operasi utama (plx TTL envelope) ───
 async function dbGet(env, key) {
   const r = await cur(env)
   let stored = null
   if (r.backend === 'turso') {
-    const rs = await r.client.execute({ sql: 'SELECT value FROM kv WHERE key = ?', args: [key] })
-    stored = rs.rows.length ? rs.rows[0].value : null
+    try {
+      const rs = await r.client.execute({ sql: 'SELECT value FROM kv WHERE key = ?', args: [key] })
+      stored = rs.rows.length ? rs.rows[0].value : null
+    } catch (e) { failover(env, r, e); stored = await kvGetRaw(env, key) }
   } else {
     stored = await env.DB.get(key)
   }
@@ -95,31 +154,70 @@ async function dbPut(env, key, value, opts) {
 }
 async function dbDelete(env, key) {
   const r = await cur(env)
-  if (r.backend === 'turso') await r.client.execute({ sql: 'DELETE FROM kv WHERE key = ?', args: [key] })
+  if (r.backend === 'turso') {
+    try { await r.client.execute({ sql: 'DELETE FROM kv WHERE key = ?', args: [key] }) }
+    catch (e) { failover(env, r, e); await env.DB.delete(key) }
+  }
   else await env.DB.delete(key)
 }
 async function dbExists(env, key) { return await dbGet(env, key) !== null }
+
+// Tulis hanya bila key belum ada. Turso: atomic via WHERE NOT EXISTS;
+// KV: check-then-act best-effort (BUKAN CAS — race antar worker bisa dobel tulis).
+async function dbPutIfAbsent(env, key, value, opts) {
+  const v = wrap(value, opts)
+  const r = await cur(env)
+  if (r.backend === 'turso') {
+    try {
+      const rs = await r.client.execute(
+        { sql: 'INSERT INTO kv(key,value) SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM kv WHERE key=?)', args: [key, v, key] })
+      const n = Number(rs.rowsAffected ?? rs.rows_affected ?? NaN)
+      if (Number.isFinite(n)) return n > 0
+      // Driver tak lapor changes → verifikasi manual via SELECT value.
+      const chk = await r.client.execute({ sql: 'SELECT value FROM kv WHERE key = ?', args: [key] })
+      return chk.rows.length === 1 && String(chk.rows[0].value) === String(v)
+    } catch (e) {
+      failover(env, r, e)
+      if ((await kvGetRaw(env, key)) !== null) return false
+      await env.DB.put(key, v)
+      return true
+    }
+  }
+  if ((await kvGetRaw(env, key)) !== null) return false
+  await env.DB.put(key, v)
+  return true
+}
 
 // ─── Raw (tanpa envelope): untuk /dev/kv + migrasi ───
 async function dbGetRaw(env, key) {
   const r = await cur(env)
   if (r.backend === 'turso') {
-    const rs = await r.client.execute({ sql: 'SELECT value FROM kv WHERE key = ?', args: [key] })
-    return rs.rows.length ? String(rs.rows[0].value) : null
+    try {
+      const rs = await r.client.execute({ sql: 'SELECT value FROM kv WHERE key = ?', args: [key] })
+      return rs.rows.length ? String(rs.rows[0].value) : null
+    } catch (e) { failover(env, r, e); return kvGetRaw(env, key) }
   }
-  const v = await env.DB.get(key)
-  return v === null || v === undefined ? null : (typeof v === 'string' ? v : JSON.stringify(v))
+  return kvGetRaw(env, key)
 }
 async function dbPutRaw(env, key, rawString) {
   const r = await cur(env)
-  if (r.backend === 'turso') await r.client.execute({ sql: 'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', args: [key, rawString] })
+  if (r.backend === 'turso') {
+    try { await r.client.execute({ sql: 'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', args: [key, rawString] }) }
+    catch (e) { failover(env, r, e); await env.DB.put(key, rawString) }
+  }
   else await env.DB.put(key, rawString)
 }
+function escapeLike(s) { return s.replace(/[\\%_]/g, c => '\\' + c) }
 async function dbList(env, prefix = '') {
   const r = await cur(env)
   if (r.backend === 'turso') {
-    const rs = await r.client.execute({ sql: 'SELECT key FROM kv WHERE key LIKE ?', args: [prefix + '%'] })
-    return rs.rows.map(x => String(x.key))
+    try {
+      const rs = await r.client.execute({ sql: "SELECT key FROM kv WHERE key LIKE ? ESCAPE '\\'", args: [escapeLike(prefix) + '%'] })
+      return rs.rows.map(x => String(x.key))
+    } catch (e) {
+      failover(env, r, e)
+      // jatuh ke list KV lokal di bawah
+    }
   }
   if (env.DB.data && typeof env.DB.data === 'object') {
     return Object.keys(env.DB.data).filter(k => k.startsWith(prefix))
@@ -194,43 +292,80 @@ async function testTurso(url, token) {
   const c = createClient({ url, authToken: token || undefined })
   try {
     await c.execute('SELECT 1')
+    await c.execute('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)')
+    await c.execute({ sql: 'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', args: ['__db_test__', '1'] })
+    await c.execute({ sql: 'DELETE FROM kv WHERE key = ?', args: ['__db_test__'] })
     return { ok: true }
   } catch (e) { return { ok: false, error: e.message } }
-  finally { try { c.close() } catch {} }
+  finally {
+    try { await c.execute({ sql: 'DELETE FROM kv WHERE key = ?', args: ['__db_test__'] }) } catch {}
+    try { c.close() } catch {}
+  }
 }
 // dir 'up' = lokal→turso, 'down' = turso→lokal. Copy raw verbatim (TTL ikut).
+// Dua fase: (1) baca SEMUA sumber ke memori — gagal = tanpa tulis satupun;
+// (2) tulis semua ke tujuan — gagal = tanpa flip mode (pemanggil gate flip pada ok).
+function skipKey(k) { return k.startsWith('lock_') || k.startsWith('__DEV_') }
+function skipValue(raw) {
+  if (typeof raw !== 'string') return false
+  return unwrap(raw).expired === true
+}
+async function listKvDirect(env) {
+  if (env.DB.data && typeof env.DB.data === 'object') return Object.keys(env.DB.data)
+  const out = []
+  let cursor = undefined
+  for (;;) {
+    const page = await env.DB.list({ prefix: '', cursor })
+    for (const k of (page.keys || [])) out.push(k.name)
+    if (page.list_complete) break
+    cursor = page.cursor
+    if (!cursor) break
+  }
+  return out
+}
 async function migrateKeys(env, dir) {
   const r = await cur(env)
   const wantActive = dir === 'up' ? 'turso' : 'kv'
-  let keys
-  if (dir === 'up') {
-    keys = (env.DB.data && typeof env.DB.data === 'object')
-      ? Object.keys(env.DB.data)
-      : (await dbList(env, ''))
-  } else {
-    if (!r.client) return { ok: false, error: 'Turso tidak terkoneksi' }
-    const rs = await r.client.execute('SELECT key FROM kv')
-    keys = rs.rows.map(x => String(x.key))
-  }
-  let moved = 0
-  for (const k of keys) {
-    let raw
+  // ── Fase 1: baca semua sumber ke memori ──
+  let pairs
+  try {
     if (dir === 'up') {
-      const v = (env.DB.data && typeof env.DB.data === 'object') ? env.DB.data[k] : await env.DB.get(k)
-      if (v === null || v === undefined) continue
-      raw = typeof v === 'string' ? v : JSON.stringify(v)
-      if (!r.client) return { ok: false, error: 'Turso tidak terkoneksi' }
-      await r.client.execute({ sql: 'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', args: [k, raw] })
+      // SELALU dari KV lokal langsung — jangan pernah dari backend aktif.
+      const keys = await listKvDirect(env)
+      pairs = []
+      for (const k of keys) {
+        const v = (env.DB.data && typeof env.DB.data === 'object') ? env.DB.data[k] : await env.DB.get(k)
+        if (v === null || v === undefined) continue
+        pairs.push([k, typeof v === 'string' ? v : JSON.stringify(v)])
+      }
     } else {
-      const rs = await r.client.execute({ sql: 'SELECT value FROM kv WHERE key = ?', args: [k] })
-      if (!rs.rows.length) continue
-      await env.DB.put(k, String(rs.rows[0].value))
+      if (!r.client) return { ok: false, error: 'Turso tidak terkoneksi', moved: 0, total: 0, skipped: 0, active: wantActive }
+      const rs = await r.client.execute('SELECT key, value FROM kv')
+      pairs = rs.rows.map(x => [String(x.key), String(x.value)])
     }
-    moved++
-  }
-  if (dir === 'down' && env.DB.save) { try { env.DB.save() } catch {} }
-  return { ok: true, moved, total: keys.length, active: wantActive }
+  } catch (e) { return { ok: false, error: e.message, moved: 0, total: 0, skipped: 0, active: wantActive } }
+  const total = pairs.length
+  // ── Fase 2: tulis semua ke tujuan ──
+  let moved = 0, skipped = 0
+  try {
+    if (dir === 'up') {
+      if (!r.client) return { ok: false, error: 'Turso tidak terkoneksi', moved, total, skipped, active: wantActive }
+      for (const [k, raw] of pairs) {
+        if (skipKey(k) || skipValue(raw)) { skipped++; continue }
+        await r.client.execute({ sql: 'INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', args: [k, raw] })
+        moved++
+      }
+    } else {
+      for (const [k, raw] of pairs) {
+        if (skipKey(k) || skipValue(raw)) { skipped++; continue }
+        await env.DB.put(k, raw)
+        moved++
+      }
+      if (env.DB.save) { try { env.DB.save() } catch {} }
+    }
+  } catch (e) { return { ok: false, error: e.message, moved, total, skipped, active: wantActive } }
+  return { ok: true, moved, total, skipped, active: wantActive }
 }
 
-export { initDb, resetDbCache, getDbInfo, dbGet, dbPut, dbDelete, dbExists,
-  dbGetRaw, dbPutRaw, dbList, dbCount, testTurso, migrateKeys }
+export { initDb, resetDbCache, getDbInfo, dbGet, dbPut, dbDelete, dbExists, dbPutIfAbsent,
+  saveDbMode, getDbMode, dbGetRaw, dbPutRaw, dbList, dbCount, testTurso, migrateKeys }

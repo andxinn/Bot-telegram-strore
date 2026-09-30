@@ -179,8 +179,11 @@ async function duitkuVerifyCallback(gw, params) {
 // ─── Test koneksi (buat + status dummy) ─────────────────────
 
 async function duitkuTest(gw) {
+  const { calcFee } = await import('./pakasir.js')
+  const fee = calcFee(gw, 10000)
+  const charge = 10000 + fee
   const testOrder = 'TEST-DK-' + Date.now()
-  const created = await duitkuCreateQris(gw, testOrder, 10000, {
+  const created = await duitkuCreateQris(gw, testOrder, charge, {
     productDetails: 'Test Koneksi', customerName: 'Tester', email: 'test@bot.local'
   })
   if (!created.ok) return { ok: false, stage: 'inquiry', error: created.error, raw: created.raw }
@@ -189,7 +192,8 @@ async function duitkuTest(gw) {
     reference:  created.reference,
     qrPreview:  (created.qrString || '').slice(0, 40) + '...',
     paymentUrl: created.paymentUrl || null,
-    provider:   gw.qrisProvider
+    provider:   gw.qrisProvider,
+    fee, charge
   }
 }
 

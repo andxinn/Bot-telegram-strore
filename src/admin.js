@@ -1327,20 +1327,28 @@ export async function handleAdminState(env, msg, state) {
         throw new Error('File kosong atau gagal diunduh.')
       }
       const data = JSON.parse(fileContent)
-      if (!data || typeof data !== 'object' || (!data.Kategori && !data.Produk && !data.UserList)) {
+
+      // Overwrite HANYA key yang tervalidasi; token rahasia tidak ikut dipulihkan
+      const ALLOWED_RESTORE = ['Kategori', 'Produk', 'SnK', 'Trx', 'UserList', 'Role', 'BannedUser', 'Voucher', 'VoucherBatch', 'VoucherAudit', 'OrderCounter', 'BotConfig', 'StokKeluar', 'StokBaru', 'FlashSale', 'FlashSaleHistory']
+      if (!data || typeof data !== 'object') throw new Error('Format database backup tidak dikenali.')
+      if (!Array.isArray(data.Kategori) && !Array.isArray(data.Produk) && !Array.isArray(data.UserList)) {
         throw new Error('Format database backup tidak dikenali.')
       }
-
-      // Overwrite all KV keys found in the backup JSON
-      for (const key of Object.keys(data)) {
-        if (data[key] !== null) {
+      if (data.BotConfig && typeof data.BotConfig === 'object' && data.BotConfig.db) {
+        delete data.BotConfig.db.token
+      }
+      for (const key of ALLOWED_RESTORE) {
+        if (data[key] !== undefined && data[key] !== null) {
           await writeJSON(env, key, data[key])
         }
       }
 
-      // Re-initialize config
+      // Re-initialize config + backend hasil restore langsung aktif
       const { initConfig } = await import('./config.js')
       await initConfig(env)
+      const { resetDbCache, initDb } = await import('./db.js')
+      resetDbCache(env)
+      await initDb(env)
 
       await deleteKey(env, 'adminState_' + fromId)
 
@@ -1714,7 +1722,10 @@ export async function handleAdminCallback(env, cq) {
   const chatId = cq.message.chat.id
   const fromId = cq.from.id
   const messageId = cq.message.message_id
-  if (!(await checkAdmin(env, fromId, chatId))) return
+  if (!(await checkAdmin(env, fromId, chatId))) {
+    try { await tgAnswerCallbackQuery(env, cqId, '🚫 Akses ditolak.', true) } catch (e) {}
+    return
+  }
 
   // ─ Tutup panel ─
   if (data === 'adm_tutup') {
@@ -2802,7 +2813,7 @@ export async function handleAdminCallback(env, cq) {
     
     const tickets = await readJSON(env, 'Tickets', [])
     const t = tickets.find(ticket => ticket.ticketId === tkId)
-    if (!t) return
+    if (!t) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket tidak ditemukan.', true); return }
 
     const adminSt = await readJSON(env, 'adminState_' + fromId, null)
     const isReplying = adminSt && adminSt.action === 'admin_reply_ticket' && adminSt.ticketId === tkId
@@ -2822,7 +2833,7 @@ export async function handleAdminCallback(env, cq) {
     
     const tickets = await readJSON(env, 'Tickets', [])
     const t = tickets.find(ticket => ticket.ticketId === tkId)
-    if (!t) return
+    if (!t) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket tidak ditemukan.', true); return }
 
     await writeJSON(env, 'adminState_' + fromId, { 
       action: 'admin_reply_ticket', 
@@ -2854,7 +2865,7 @@ export async function handleAdminCallback(env, cq) {
     
     const tickets = await readJSON(env, 'Tickets', [])
     const t = tickets.find(ticket => ticket.ticketId === tkId)
-    if (!t) return
+    if (!t) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket tidak ditemukan.', true); return }
 
     const newText = buildGroupTicketLogText(t)
     const kb = buildGroupTicketLogKeyboard(t)
@@ -3148,9 +3159,18 @@ export async function handleAdminCallback(env, cq) {
   // ─── DB: switch backend ───
   if (data === 'adm_db_mode_kv' || data === 'adm_db_mode_turso') {
     const to = data === 'adm_db_mode_turso' ? 'turso' : 'kv'
-    const cfg = await readJSON(env, 'BotConfig', {})
-    cfg.db = { ...(cfg.db || {}), mode: to }
-    await writeJSON(env, 'BotConfig', cfg)
+    const { saveDbMode, testTurso: testConn } = await import('./db.js')
+    if (to === 'turso') {
+      const cfgT = await readJSON(env, 'BotConfig', {})
+      const bT = (cfgT && cfgT.db) || {}
+      const urlT = env.TURSO_URL || bT.url || ''
+      if (urlT) {
+        const tokenT = env.TURSO_TOKEN || bT.token || ''
+        const t = await testConn(urlT, tokenT)
+        if (!t.ok) { await tgAnswerCallbackQuery(env, cqId, '❌ Turso tak terjangkau: ' + (t.error || 'gagal').slice(0, 70), true); return }
+      }
+    }
+    await saveDbMode(env, to)
     const { resetDbCache } = await import('./db.js')
     resetDbCache(env)
     await showDbMenu(env, chatId, messageId)
@@ -3182,19 +3202,19 @@ export async function handleAdminCallback(env, cq) {
     await showDbMenu(env, chatId, messageId)
     return
   }
-  // migrasi: baca penuh dari sumber SEBELUM tulis satupun (fail-fast, rollback-friendly)
+  // migrasi dua fase (db.js): baca penuh dulu, tulis setelahnya.
+  // Mode di-flip HANYA bila migrateKeys return ok.
   if (data === 'adm_db_mig_up' || data === 'adm_db_mig_down') {
     const dir = data === 'adm_db_mig_up' ? 'up' : 'down'
     try {
-      const { migrateKeys, resetDbCache } = await import('./db.js')
+      const { migrateKeys, saveDbMode, resetDbCache } = await import('./db.js')
       const r = await migrateKeys(env, dir)
-      if (!r.ok) { await tgAnswerCallbackQuery(env, cqId, '❌ ' + r.error, true); return }
-      const cfg = await readJSON(env, 'BotConfig', {})
-      cfg.db = { ...(cfg.db || {}), mode: r.active }
-      await writeJSON(env, 'BotConfig', cfg)
+      if (!r.ok) { await tgAnswerCallbackQuery(env, cqId, '❌ ' + (r.error || 'gagal').slice(0, 80), true); return }
+      await saveDbMode(env, r.active)
       resetDbCache(env)
       await showDbMenu(env, chatId, messageId)
-      await tgAnswerCallbackQuery(env, cqId, '✅ Migrasi ok: ' + r.moved + '/' + r.total + ' key')
+      const skipTxt = r.skipped ? ' (lewati ' + r.skipped + ')' : ''
+      await tgAnswerCallbackQuery(env, cqId, '✅ Migrasi ok: ' + r.moved + '/' + r.total + ' key' + skipTxt)
     } catch (e) {
       await tgAnswerCallbackQuery(env, cqId, '❌ Migrasi gagal: ' + e.message.slice(0, 80), true)
     }
@@ -3207,6 +3227,10 @@ export async function handleAdminCallback(env, cq) {
       const backup = {}
       for (const key of keys) {
         backup[key] = await readJSON(env, key, null)
+      }
+      // Jangan bocorkan secret: token Turso tidak ikut backup
+      if (backup.BotConfig && typeof backup.BotConfig === 'object' && backup.BotConfig.db) {
+        backup.BotConfig = { ...backup.BotConfig, db: { ...backup.BotConfig.db, token: undefined } }
       }
       const { getDate } = await import('./helpers.js')
       const dateStr = getDate('Asia/Jakarta').replace(/[^0-9]/g, '_')

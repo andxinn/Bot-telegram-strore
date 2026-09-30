@@ -262,19 +262,70 @@ async function fsShowConfirm(env, chatId, messageId, fromId) {
 function adminMainPanel() {
   return {
     inline_keyboard: [
-      [{ text: '📦 Add Stock', callback_data: 'adm_addstock' }, { text: '🗑 Del Stock', callback_data: 'adm_delstock' }],
-      [{ text: '✏️ Edit Harga', callback_data: 'adm_editharga' }, { text: '✏️ Edit Nama', callback_data: 'adm_editnama' }],
-      [{ text: '📝 Edit Desk. Varian', callback_data: 'adm_editdesc' }, { text: '📝 Edit Desk. Kategori', callback_data: 'adm_editkatdesc' }],
-      [{ text: '📋 Edit SnK', callback_data: 'adm_editsnk' }, { text: '📤 Export Stok', callback_data: 'adm_export' }],
-      [{ text: '➕ Tambah Kategori', callback_data: 'adm_addkat' }, { text: '❌ Hapus Kategori', callback_data: 'adm_delkat' }],
-      [{ text: '📢 Broadcast', callback_data: 'adm_broadcast' }, { text: '👥 User List', callback_data: 'adm_userlist' }],
-      [{ text: '🔥 Flash Sale', callback_data: 'adm_flashsale' }],
-      [{ text: '🎫 Voucher & Redeem', callback_data: 'adm_voucher' }],
-      [{ text: '👑 Kelola Admin', callback_data: 'adm_manage_admin' }],
-      [{ text: '⚙️ Settings', callback_data: 'adm_settings' }],
+      [{ text: '📦 Produk & Stok', callback_data: 'adm_cat_produk' }, { text: '🔥 Promo', callback_data: 'adm_cat_promo' }],
+      [{ text: '💳 Pembayaran', callback_data: 'adm_cat_bayar' }, { text: '📢 Komunikasi', callback_data: 'adm_cat_komunikasi' }],
+      [{ text: '👥 Pengguna', callback_data: 'adm_cat_user' }, { text: '⚙️ Sistem', callback_data: 'adm_cat_sistem' }],
       [{ text: '❌ Tutup', callback_data: 'adm_tutup' }]
     ]
   }
+}
+
+// ─── v9update18+: submenu kategori admin (max 2 klik ke aksi) ───
+export function adminCatPanel(cat) {
+  const back = [[{ text: '🔙 Kembali', callback_data: 'adm_panel' }]]
+  const menus = {
+    produk: {
+      text: '*📦 PRODUK & STOK*\n\nKelola produk, varian & stok harian:',
+      rows: [
+        [{ text: '📦 Tambah Stok', callback_data: 'adm_addstock' }, { text: '🗑 Hapus Stok', callback_data: 'adm_delstock' }],
+        [{ text: '💲 Edit Harga', callback_data: 'adm_editharga' }, { text: '✏️ Edit Nama', callback_data: 'adm_editnama' }],
+        [{ text: '📝 Desk. Varian', callback_data: 'adm_editdesc' }, { text: '📝 Desk. Kategori', callback_data: 'adm_editkatdesc' }],
+        [{ text: '📋 SnK', callback_data: 'adm_editsnk' }, { text: '👁 Lihat Stok', callback_data: 'adm_lihatstok' }],
+        [{ text: '➕ Kategori', callback_data: 'adm_addkat' }, { text: '❌ Hapus Kat.', callback_data: 'adm_delkat' }],
+        [{ text: '📤 Export Stok', callback_data: 'adm_export' }],
+      ],
+    },
+    promo: {
+      text: '*🔥 PROMO*\n\nFlash sale & voucher:',
+      rows: [
+        [{ text: '🔥 Flash Sale', callback_data: 'adm_flashsale' }],
+        [{ text: '🎫 Voucher & Redeem', callback_data: 'adm_voucher' }],
+      ],
+    },
+    bayar: {
+      text: '*💳 PEMBAYARAN*\n\nGateway & pantauan transaksi:',
+      rows: [
+        [{ text: '💳 Payment Gateway', callback_data: 'adm_payment' }],
+        [{ text: '📊 Log Transaksi', callback_data: 'adm_txlog_info' }],
+      ],
+    },
+    komunikasi: {
+      text: '*📢 KOMUNIKASI*\n\nBroadcast & tiket bantuan user:',
+      rows: [
+        [{ text: '📢 Broadcast', callback_data: 'adm_broadcast' }, { text: '🆕 BC Stok Baru', callback_data: 'adm_bc_stokbaru' }],
+        [{ text: '🎫 Tiket User', callback_data: 'tk_adm_back_cat' }],
+      ],
+    },
+    user: {
+      text: '*👥 PENGGUNA*\n\nUser, admin & saldo manual:',
+      rows: [
+        [{ text: '👥 Daftar User', callback_data: 'adm_userlist' }, { text: '💰 Saldo Manual', callback_data: 'adm_saldo' }],
+        [{ text: '👑 Kelola Admin', callback_data: 'adm_manage_admin' }],
+      ],
+    },
+    sistem: {
+      text: '*⚙️ SISTEM*\n\nIdentitas, media, channel & database:',
+      rows: [
+        [{ text: '🏷️ Identitas & Info', callback_data: 'adm_setfolder_identitas' }, { text: '🖼️ Media & Banner', callback_data: 'adm_setfolder_media' }],
+        [{ text: '📢 Channel & Log', callback_data: 'adm_setfolder_channel' }, { text: '🏆 Fitur Tambahan', callback_data: 'adm_setfolder_fitur' }],
+        [{ text: '💾 Kelola Database', callback_data: 'adm_setfolder_db' }],
+        [{ text: '⚙️ Pengaturan Lain', callback_data: 'adm_settings_legacy' }],
+      ],
+    },
+  }
+  const m = menus[cat]
+  if (!m) return adminMainPanel()
+  return { inline_keyboard: [...m.rows, ...back], _text: m.text }
 }
 
 function expiredButtons() {
@@ -525,6 +576,35 @@ export async function handleAdminState(env, msg, state) {
     try { if (msg.message_id) await tgDeleteMessage(env, chatId, msg.message_id) } catch (e) {}
     await deleteKey(env, 'adminState_' + fromId)
     await tgSendMessage(env, chatId, '✅ Turso token disimpan (tersembunyi).', adminMainPanel(), 'Markdown'); return
+  }
+
+  // ── SALDO MANUAL: pilih user ──
+  if (state.action === 'saldo_pick_user') {
+    const q = (text || '').trim()
+    const { getUserList } = await import('./user.js')
+    const users = await getUserList(env)
+    const u = users.find(x => String(x.chatId) === q || (x.name && x.name.toLowerCase().includes(q.toLowerCase())))
+    if (!u) { await tgSendMessage(env, chatId, '⚠️ User tidak ditemukan. Kirim ID atau nama (harus /start dulu).\n_Ketik /batal jika tidak jadi._'); return }
+    await writeJSON(env, 'adminState_' + fromId, { action: 'saldo_amount', targetId: u.chatId, targetName: u.name })
+    await tgSendMessage(env, chatId, '*💰 Saldo Manual: ' + (u.name || u.chatId) + '*\nSaldo saat ini: ' + ParseIdr(u.balance || 0) + '\n\nKirim nominal dengan tanda:\n`+50000` tambah · `-20000` kurangi\n_Ketik /batal jika tidak jadi._', null, 'Markdown')
+    return
+  }
+  // ── SALDO MANUAL: nominal +/-, max 2jt/tx ──
+  if (state.action === 'saldo_amount') {
+    const m = (text || '').trim().match(/^([+-])\s?(\d+)$/)
+    if (!m) { await tgSendMessage(env, chatId, '⚠️ Format salah. Contoh: `+50000` atau `-20000`.'); return }
+    const amt = parseInt(m[2])
+    if (!amt || amt <= 0 || amt > 2000000) { await tgSendMessage(env, chatId, '⚠️ Nominal 1–2.000.000 per transaksi.'); return }
+    const delta = m[1] === '+' ? amt : -amt
+    const { getUser, addSaldo, minSaldo, cekSaldo } = await import('./user.js')
+    const target = await getUser(env, state.targetId)
+    if (!target) { await deleteKey(env, 'adminState_' + fromId); await tgSendMessage(env, chatId, '⚠️ User hilang.'); return }
+    if (delta < 0 && (Number(target.balance) || 0) < amt) { await tgSendMessage(env, chatId, '⚠️ Saldo user tidak cukup (' + ParseIdr(target.balance || 0) + ').'); return }
+    const newBal = delta > 0 ? await addSaldo(env, state.targetId, amt) : await minSaldo(env, state.targetId, amt)
+    await deleteKey(env, 'adminState_' + fromId)
+    await tgSendMessage(env, chatId, '✅ Saldo *' + (target.name || state.targetId) + '* diubah ' + (delta > 0 ? '+' : '-') + ParseIdr(amt) + '.\nSaldo baru: ' + ParseIdr(newBal || 0), adminMainPanel(), 'Markdown')
+    try { await tgSendMessage(env, state.targetId, '💰 *Saldo Anda diubah admin* ' + (delta > 0 ? '+' : '-') + ParseIdr(amt) + '\nSaldo baru: ' + ParseIdr(newBal || 0), null, 'Markdown') } catch (e) {}
+    return
   }
 
   // ── ADD STOCK: kirim data stok ──
@@ -1746,6 +1826,39 @@ export async function handleAdminCallback(env, cq) {
     return
   }
 
+  // ─ Router kategori (panel 6 kategori, max 2 klik ke aksi) ─
+  if (data.startsWith('adm_cat_')) {
+    const cat = data.replace('adm_cat_', '')
+    const panel = adminCatPanel(cat)
+    await tgEditMessageText(env, chatId, messageId, panel._text || '*🛠️ ADMIN PANEL*', { inline_keyboard: panel.inline_keyboard }, 'Markdown')
+    return
+  }
+
+  // ─ Saldo manual: minta ID/nama user ─
+  if (data === 'adm_saldo') {
+    await writeJSON(env, 'adminState_' + fromId, { action: 'saldo_pick_user' })
+    await tgEditMessageText(env, chatId, messageId,
+      '*💰 Saldo Manual*\n\nKirim ID Telegram atau nama user (tambah `+` / kurang `-` di langkah berikut).\n\n_Ketik /batal jika tidak jadi._',
+      { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_panel' }]] }, 'Markdown')
+    return
+  }
+
+  // ─ Log transaksi: status channel + pintasan setting ─
+  if (data === 'adm_txlog_info') {
+    const cfg = await readJSON(env, 'BotConfig', {})
+    const cur = cfg.ChannelLog || env.CHANNEL_LOG || ''
+    await tgEditMessageText(env, chatId, messageId,
+      '*📊 Log Transaksi*\n\nSetiap transaksi sukses/gagal otomatis terkirim ke channel log.\n\nChannel saat ini: `' + (cur || 'belum diset') + '`\n\n' +
+      (cur ? 'Pantau semua transaksi di channel tersebut.' : 'Set channel dulu agar log tercatat.'),
+      { inline_keyboard: [[{ text: '📢 Setting Channel Log', callback_data: 'adm_set_channel_log_tx' }], [{ text: '🔙 Kembali', callback_data: 'adm_panel' }]] }, 'Markdown')
+    return
+  }
+
+  // ─ Pengaturan lain (legacy adm_settings, isi lama dipertahankan) ─
+  if (data === 'adm_settings_legacy') {
+    data = 'adm_settings'
+  }
+
   const produk = await readJSON(env, 'Produk', [])
   const kategori = await readJSON(env, 'Kategori', [])
 
@@ -2943,6 +3056,7 @@ export async function handleAdminCallback(env, cq) {
       inline_keyboard: [
         [{ text: '🔵 PROSES (' + openCount + ')', callback_data: 'tk_adm_cat_proses' }],
         [{ text: '🟢 SELESAI (' + closedCount + ')', callback_data: 'tk_adm_cat_selesai' }],
+        [{ text: '🔙 Kembali', callback_data: 'adm_cat_komunikasi' }],
         [{ text: '❌ Tutup Menu', callback_data: 'adm_tutup' }]
       ]
     }

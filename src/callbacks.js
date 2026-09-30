@@ -770,8 +770,8 @@ async function handleCallbackQuery(env, cq) {
           await tgSendMessage(env, chatId, '⚠️ Payment gateway (Duitku) belum aktif. Silakan bayar via Saldo atau hubungi admin.', getMainMenuKeyboard())
           return
         }
-      const merchantFeeDk = 0
-      const chargeAmtDk = tot2
+      const merchantFeeDk = calcFee(gwQ, tot2)
+      const chargeAmtDk = tot2 + merchantFeeDk
       const createdDk = await duitkuCreateQris(gwQ, trxId2, chargeAmtDk, {
           productDetails: os2.varian || os2.produk || 'Order',
           customerName: fromName || 'Customer',
@@ -852,8 +852,8 @@ async function handleCallbackQuery(env, cq) {
         await tgSendMessage(env, chatId, '⚠️ Payment gateway belum aktif. Silakan bayar via Saldo atau hubungi admin.', getMainMenuKeyboard())
         return
       }
-      const merchantFee = 0
-      const chargeAmt = tot2
+      const merchantFee = calcFee(gwQ, tot2)
+      const chargeAmt = tot2 + merchantFee
       const createdQ = await pakasirCreate(gwQ, trxId2, chargeAmt)
       if (!createdQ.ok) {
         await releaseLock(env, qrisLock)

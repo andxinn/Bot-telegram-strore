@@ -342,7 +342,7 @@ async function handleCallbackQuery(env, cq) {
     const trxAll = await readJSON(env, 'Trx', [])
     const sold = trxAll.filter(t => t.status === 'Lunas' && String(t.produk) === String(kat.produkName)).reduce((a, t) => a + (Number(t.jumlah) || 0), 0)
     const view = buildVariantView(kat, variants, fsMap, sold)
-    await editCard(env, cq, view.caption, view.keyboard)
+    await editCard(env, cq, view.caption, view.keyboard, view.parseMode)
     return
   }
 
@@ -477,7 +477,7 @@ async function handleCallbackQuery(env, cq) {
     const trxAll = await readJSON(env, 'Trx', [])
     const sold = trxAll.filter(t => t.status === 'Lunas' && String(t.produk) === String(kat.produkName)).reduce((a, t) => a + (Number(t.jumlah) || 0), 0)
     const view = buildVariantView(kat, variants, fsMap, sold)
-    await editCard(env, cq, view.caption, view.keyboard)
+    await editCard(env, cq, view.caption, view.keyboard, view.parseMode)
     return
   }
 

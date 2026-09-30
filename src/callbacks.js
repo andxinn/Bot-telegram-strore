@@ -1,13 +1,13 @@
 import { NamaBot, StoreName, OwnerID, InvoiceLogger, BannerFileId, SimulatePayment, SimulateDelay, orderBotName } from './config.js'
 import { readJSON, writeJSON, deleteKey, readText, writeText, existsKey } from './kv.js'
-import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgEditMessageText, tgEditMessageMedia, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendDocumentFile, tgSendSticker, tgCloseForumTopic, tgDeleteForumTopic } from './telegram.js'
+import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgEditMessageText, tgEditMessageMedia, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendDocumentFile, tgSendSticker, tgCloseForumTopic } from './telegram.js'
 import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam, generateTrxId, generateOrderId, expiredTime, parseExpiredWIB } from './helpers.js'
 import { getUser, addUser, addSaldo, cekSaldo, minSaldo, isOwner, getRole, acquireLock, releaseLock } from './user.js'
 import { getManagePanel, getMainMenuKeyboard } from './keyboard.js'
 import { generateQris } from './qris.js'
 import { getActiveGateway, pakasirConfigured, calcFee, feeLabel, methodLabel, pakasirCreate, pakasirCancel, pakasirDetail, pakasirSimulate, qrImageUrl } from './pakasir.js'
 import { duitkuConfigured, duitkuCreateQris, providerLabel, qrImageUrl as dkQrImageUrl } from './duitku.js'
-import { handleAdminCallback } from './admin.js'
+import { handleAdminCallback, buildTicketChatHtml } from './admin.js'
 
 async function editCard(env, cq, caption, keyboard, parseMode = 'Markdown') {
   const chatId = cq.message.chat.id
@@ -100,62 +100,32 @@ async function handleCallbackQuery(env, cq) {
     }
     await tgAnswerCallbackQuery(env, cqId, '🎫 Membuka rincian tiket', false)
 
-    const escH = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     const userUsn = t.userUsername ? '@' + t.userUsername : (t.userName || 'User')
     const statusLabel = t.status === 'closed' ? '✅ Selesai' : (t.status === 'answered' ? '🔵 Ada Balasan' : '⏳ Menunggu Admin')
+    const chat = buildTicketChatHtml(t, page)
 
-    let cap = '╭───〔 🎫 TIKET: ' + t.ticketId + ' 〕───\n'
-    cap += '┊ Status: ' + statusLabel + '\n'
-    cap += '╰──────────────────\n\n'
-
-    const msgs = t.messages || []
-    const limit = 5
-    const totalPages = Math.ceil(msgs.length / limit) || 1
-    
-    let activePage = page
-    if (activePage === null) {
-      activePage = totalPages
-    }
-    activePage = Math.max(1, Math.min(activePage, totalPages))
-
-    const startIdx = (activePage - 1) * limit
-    const visibleMsgs = msgs.slice(startIdx, startIdx + limit)
-
-    visibleMsgs.forEach((m, idx) => {
-      const timeStr = m.time ? ' (' + m.time + ')' : ''
-      if (m.sender === 'user') {
-        const sn = m.username || ('@' + userUsn)
-        cap += '<b>' + escH(sn) + '</b>' + escH(timeStr) + '\npesan : ' + escH(m.text) + '\n'
-      } else {
-        cap += '<blockquote><b>ADMIN</b>' + escH(timeStr) + '\npesan : ' + escH(m.text) + '</blockquote>'
-      }
-      if (idx < visibleMsgs.length - 1) {
-        cap += '<code>──────────────────</code>\n'
-      }
-    })
-
-    if (totalPages > 1) {
-      cap += '\n📖 <i>Halaman ' + activePage + ' dari ' + totalPages + '</i>\n'
-    }
+    let cap = '🎫 <b>' + t.ticketId + '</b> • ' + statusLabel + '\n\n'
+    cap += chat.html
 
     const rows = []
-    
+
     // Navigation row
-    if (totalPages > 1) {
+    if (chat.totalPages > 1) {
       const navRow = []
-      if (activePage > 1) {
-        navRow.push({ text: '◀️ Sebelumnya', callback_data: 'tk_view_' + t.ticketId + '_' + (activePage - 1) })
+      if (chat.activePage > 1) {
+        navRow.push({ text: '◀️ Sebelumnya', callback_data: 'tk_view_' + t.ticketId + '_' + (chat.activePage - 1) })
       }
-      navRow.push({ text: 'Hal ' + activePage + '/' + totalPages, callback_data: 'noop' })
-      if (activePage < totalPages) {
-        navRow.push({ text: 'Selanjutnya ▶️', callback_data: 'tk_view_' + t.ticketId + '_' + (activePage + 1) })
+      navRow.push({ text: 'Hal ' + chat.activePage + '/' + chat.totalPages, callback_data: 'noop' })
+      if (chat.activePage < chat.totalPages) {
+        navRow.push({ text: 'Selanjutnya ▶️', callback_data: 'tk_view_' + t.ticketId + '_' + (chat.activePage + 1) })
       }
       rows.push(navRow)
     }
 
     // Media buttons row
+    const visibleMsgs = t.messages ? t.messages.slice(chat.startIdx, chat.startIdx + 5) : []
     visibleMsgs.forEach((m, idx) => {
-      const globalIdx = startIdx + idx
+      const globalIdx = chat.startIdx + idx
       if (m.photoFileId) {
         rows.push([{ text: '🖼️ Lihat Foto (Pesan ' + (globalIdx + 1) + ')', callback_data: 'tk_media_' + t.ticketId + '_' + globalIdx }])
       } else if (m.docFileId) {
@@ -164,13 +134,12 @@ async function handleCallbackQuery(env, cq) {
     })
 
     if (t.status === 'answered') {
-      cap += '\nApakah masalah ini sudah selesai?'
       rows.push([
-        { text: '✅ Selesai', callback_data: 'tk_close_' + t.ticketId, style: 'success' },
-        { text: '💬 Balas Pesan', callback_data: 'tk_follow_' + t.ticketId, style: 'primary' }
+        { text: '✅ Tandai Selesai', callback_data: 'tk_close_' + t.ticketId, style: 'success' },
+        { text: '💬 Balas', callback_data: 'tk_follow_' + t.ticketId, style: 'primary' }
       ])
     } else if (t.status === 'open') {
-      rows.push([{ text: '➕ Follow Up Chat', callback_data: 'tk_follow_' + t.ticketId }])
+      rows.push([{ text: '💬 Balas / Follow Up', callback_data: 'tk_follow_' + t.ticketId }])
     }
     rows.push([{ text: '🔙 Daftar Tiket', callback_data: 'tk_list' }, { text: '🔙 Menu Tiket', callback_data: 'tk_back_menu' }])
 
@@ -236,16 +205,31 @@ async function handleCallbackQuery(env, cq) {
       await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan tiket Anda.', true)
       return
     }
+    // Konfirmasi: user harus tekan sekali lagi agar tidak salah pencet
+    if (!data.startsWith('tk_close_yes_') && !isOwner(fromId) && await getRole(env, fromId) !== 'admin') {
+      await tgAnswerCallbackQuery(env, cqId, 'Konfirmasi penutupan tiket', false)
+      await editCard(env, cq,
+        '🔒 *Tutup Tiket?*\n\nTiket `' + tkId + '` akan ditandai selesai dan tidak bisa dibalas lagi.\n\nYakin?',
+        {
+          inline_keyboard: [
+            [{ text: '✅ Ya, Tutup Tiket', callback_data: 'tk_close_yes_' + tkId, style: 'success' }],
+            [{ text: '🔙 Kembali', callback_data: 'tk_view_' + tkId }]
+          ]
+        }, 'Markdown')
+      return
+    }
+    const realTkId = tkId.replace('tk_close_yes_', '')
+    const idx2 = tickets.findIndex(ticket => ticket.ticketId === realTkId)
     await tgAnswerCallbackQuery(env, cqId, '🔒 Tiket bantuan berhasil ditutup', false)
-    if (idx !== -1) {
-      const t = tickets[idx]
+    if (idx2 !== -1) {
+      const t = tickets[idx2]
       t.status = 'closed'
       t.closedAt = Date.now()
       await writeJSON(env, 'Tickets', tickets)
 
       if (t.logChatId && t.threadId) {
         try {
-          await tgDeleteForumTopic(env, t.logChatId, t.threadId)
+          await tgCloseForumTopic(env, t.logChatId, t.threadId)
         } catch (e) {}
 
         if (t.logMessageId) {
@@ -258,7 +242,7 @@ async function handleCallbackQuery(env, cq) {
         }
       }
     }
-    cq.data = 'tk_view_' + tkId
+    cq.data = 'tk_view_' + realTkId
     await handleCallbackQuery(env, cq)
     return
   }

@@ -71,9 +71,9 @@ async function handleCommand(env, msg) {
       const { getMainMenuKeyboard } = await import('./keyboard.js')
       await tgSendMessage(env, t.userId, userMsg, getMainMenuKeyboard(), 'HTML')
 
-      const { tgDeleteForumTopic } = await import('./telegram.js')
+      const { tgCloseForumTopic } = await import('./telegram.js')
       try {
-        await tgDeleteForumTopic(env, msg.chat.id, tid)
+        await tgCloseForumTopic(env, msg.chat.id, tid)
       } catch (e) {}
     }
     return

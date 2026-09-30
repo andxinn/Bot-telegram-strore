@@ -478,12 +478,9 @@ function buildProductListView(kategori, page) {
 function buildVariantView(kat, variants, fsMap = {}, sold = 0) {
   // Layout ala referensi: pill header, Terjual (dihitung dari Trx), baris bold
   // "*Nama: Rp. X | Stok: N*", footer refresh, tombol nama varian full-width.
-  const katName = mdSafe(kat.produkName)
-  let cap = '*[DETAIL PRODUK "' + katName + '"]*\n'
-  cap += 'Produk:\n'
-  cap += '*' + katName + '*\n'
+  let cap = '*DETAIL PRODUK*\n'
   cap += 'Terjual: *' + (Number(sold) || 0).toLocaleString('id-ID') + '*\n\n'
-  cap += '*[VARIASI & HARGA "' + katName + '"]*\n'
+  cap += '*[VARIASI & HARGA]*\n'
   variants.forEach(v => {
     const st = v.stok ? v.stok.length : 0
     const fs = fsMap[String(v.id)]

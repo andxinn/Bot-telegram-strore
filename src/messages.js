@@ -481,18 +481,17 @@ function buildVariantView(kat, variants, fsMap = {}, sold = 0) {
   // baris "✱ Nama: Rp. X | Stok: N", footer refresh italic, tombol nama full-width.
   const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const katName = esc(kat.produkName)
-  let cap = '<blockquote>DETAIL PRODUK\n'
+  let cap = '<blockquote>DETAIL PRODUK</blockquote>\n'
   cap += 'Produk:\n'
-  cap += '<b>' + katName + '</b></blockquote>\n'
+  cap += '<b>' + katName + '</b>\n'
   cap += '\nTerjual: <b>' + (Number(sold) || 0).toLocaleString('id-ID') + '</b>\n'
-  cap += '\n<blockquote>VARIASI &amp; HARGA\n'
+  cap += '\n<blockquote>VARIASI &amp; HARGA</blockquote>\n'
   variants.forEach(v => {
     const st = v.stok ? v.stok.length : 0
     const fs = fsMap[String(v.id)]
     const effPrice = fs ? Number(fs.salePrice) : (v.price || 0)
     cap += '✱ ' + esc(v.nameproduct) + ': Rp. ' + effPrice.toLocaleString('id-ID') + ' | Stok: <b>' + st + '</b>\n'
   })
-  cap += '</blockquote>\n'
   cap += '\n<i>Refresh at ' + getTanggalJam().jam + ' WIB</i>'
   const rows = []
   for (const v of variants) {

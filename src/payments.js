@@ -1,5 +1,5 @@
 import { InvoiceLogger, SimulatePayment, NamaBot } from './config.js'
-import { readJSON, writeJSON, deleteKey } from './kv.js'
+import { readJSON, writeJSON, writeText, deleteKey, existsKey } from './kv.js'
 import { tgSendMessage, tgSendDocument, tgDeleteMessage, tgEditMessageCaption, tgSendSticker } from './telegram.js'
 import { escapeMarkdown, ParseIdr, formatWIB, getDate, getTanggalJam, generateTrxId, parseExpiredWIB } from './helpers.js'
 import { pakasirDetail } from './pakasir.js'
@@ -110,8 +110,8 @@ async function processPaymentSuccess(env, session, matchData) {
   if (!details) return
 
   const doneKey = 'pay_done_' + session.id
-  if (await env.DB.get(doneKey)) return
-  await env.DB.put(doneKey, '1', { expirationTtl: 30 * 24 * 3600 })
+  if (await existsKey(env, doneKey)) return
+  await writeText(env, doneKey, '1', { expirationTtl: 30 * 24 * 3600 })
   if (details.type === 'deposit') {
     const { addSaldo, cekSaldo } = await import('./user.js')
     await addSaldo(env, details.userId, details.amount)

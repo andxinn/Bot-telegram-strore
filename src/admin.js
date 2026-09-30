@@ -505,6 +505,28 @@ export async function handleAdminState(env, msg, state) {
     return
   }
 
+  // ── DB: kredensial Turso via bot (token dihapus otomatis setelah disimpan) ──
+  if (state.action === 'db_turso_url') {
+    const v = (text||'').trim()
+    if (!v || v.length < 8 || !/^(libsql|https?):\/\//i.test(v)) { await tgSendMessage(env, chatId, '⚠️ URL tidak valid. Contoh: `libsql://xxx.turso.io`'); return }
+    const cfg = await readJSON(env, 'BotConfig', {}); cfg.db = { ...(cfg.db || {}), url: v }; await writeJSON(env, 'BotConfig', cfg)
+    const { resetDbCache } = await import('./db.js')
+    resetDbCache(env)
+    try { if (msg.message_id) await tgDeleteMessage(env, chatId, msg.message_id) } catch (e) {}
+    await deleteKey(env, 'adminState_' + fromId)
+    await tgSendMessage(env, chatId, '✅ Turso URL disimpan.', adminMainPanel(), 'Markdown'); return
+  }
+  if (state.action === 'db_turso_token') {
+    const v = (text||'').trim()
+    if (!v || v.length < 8) { await tgSendMessage(env, chatId, '⚠️ Token tidak valid.'); return }
+    const cfg = await readJSON(env, 'BotConfig', {}); cfg.db = { ...(cfg.db || {}), token: v }; await writeJSON(env, 'BotConfig', cfg)
+    const { resetDbCache } = await import('./db.js')
+    resetDbCache(env)
+    try { if (msg.message_id) await tgDeleteMessage(env, chatId, msg.message_id) } catch (e) {}
+    await deleteKey(env, 'adminState_' + fromId)
+    await tgSendMessage(env, chatId, '✅ Turso token disimpan (tersembunyi).', adminMainPanel(), 'Markdown'); return
+  }
+
   // ── ADD STOCK: kirim data stok ──
   if (state.action === 'addstock_data') {
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
@@ -3119,16 +3141,63 @@ export async function handleAdminCallback(env, cq) {
 
   // 📂 SUBFOLDER: Kelola Database
   if (data === 'adm_setfolder_db') {
+    await showDbMenu(env, chatId, messageId)
+    return
+  }
+
+  // ─── DB: switch backend ───
+  if (data === 'adm_db_mode_kv' || data === 'adm_db_mode_turso') {
+    const to = data === 'adm_db_mode_turso' ? 'turso' : 'kv'
+    const cfg = await readJSON(env, 'BotConfig', {})
+    cfg.db = { ...(cfg.db || {}), mode: to }
+    await writeJSON(env, 'BotConfig', cfg)
+    const { resetDbCache } = await import('./db.js')
+    resetDbCache(env)
+    await showDbMenu(env, chatId, messageId)
+    await tgAnswerCallbackQuery(env, cqId, to === 'turso' ? '🗄️ Mode: Turso' : '💾 Mode: Lokal/KV')
+    return
+  }
+  if (data === 'adm_db_url') {
+    await writeJSON(env, 'adminState_' + fromId, { action: 'db_turso_url' })
     await tgEditMessageText(env, chatId, messageId,
-      '*💾 KELOLA DATABASE*\nUnduh backup dan pulihkan database bot:',
-      {
-        inline_keyboard: [
-          [{ text: '📤 Backup Database (Download)', callback_data: 'adm_backup_db' }],
-          [{ text: '💾 Load Database (Restore JSON)', callback_data: 'adm_load_db' }],
-          [{ text: '🔙 Kembali ke Settings', callback_data: 'adm_settings' }]
-        ]
-      }, 'Markdown'
-    )
+      '*🔗 Turso URL*\nKirim URL database, contoh:\n`libsql://bot-store-xxx.turso.io`\n\n_Didapat dari dashboard turso.tech → database → Connect._\n\n_Ketik /batal jika tidak jadi._',
+      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_setfolder_db' }]] }, 'Markdown'
+    ); return
+  }
+  if (data === 'adm_db_token') {
+    await writeJSON(env, 'adminState_' + fromId, { action: 'db_turso_token' })
+    await tgEditMessageText(env, chatId, messageId,
+      '*🔑 Turso Auth Token*\nKirim token (`turso db tokens create <nama-db>`).\nPesan Anda akan dihapus otomatis untuk keamanan.\n\n_Ketik /batal jika tidak jadi._',
+      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_setfolder_db' }]] }, 'Markdown'
+    ); return
+  }
+  if (data === 'adm_db_test') {
+    const cfg = await readJSON(env, 'BotConfig', {})
+    const b = (cfg && cfg.db) || {}
+    const url = env.TURSO_URL || b.url || ''
+    const token = env.TURSO_TOKEN || b.token || ''
+    const { testTurso } = await import('./db.js')
+    const r = await testTurso(url, token)
+    await tgAnswerCallbackQuery(env, cqId, r.ok ? '✅ Turso OK' : '❌ ' + (r.error || 'gagal').slice(0, 80), !r.ok)
+    await showDbMenu(env, chatId, messageId)
+    return
+  }
+  // migrasi: baca penuh dari sumber SEBELUM tulis satupun (fail-fast, rollback-friendly)
+  if (data === 'adm_db_mig_up' || data === 'adm_db_mig_down') {
+    const dir = data === 'adm_db_mig_up' ? 'up' : 'down'
+    try {
+      const { migrateKeys, resetDbCache } = await import('./db.js')
+      const r = await migrateKeys(env, dir)
+      if (!r.ok) { await tgAnswerCallbackQuery(env, cqId, '❌ ' + r.error, true); return }
+      const cfg = await readJSON(env, 'BotConfig', {})
+      cfg.db = { ...(cfg.db || {}), mode: r.active }
+      await writeJSON(env, 'BotConfig', cfg)
+      resetDbCache(env)
+      await showDbMenu(env, chatId, messageId)
+      await tgAnswerCallbackQuery(env, cqId, '✅ Migrasi ok: ' + r.moved + '/' + r.total + ' key')
+    } catch (e) {
+      await tgAnswerCallbackQuery(env, cqId, '❌ Migrasi gagal: ' + e.message.slice(0, 80), true)
+    }
     return
   }
 
@@ -4089,6 +4158,43 @@ export async function handleAdminCallback(env, cq) {
   try { await tgAnswerCallbackQuery(env, cqId) } catch (e) {}
 }
 
+
+// ─── Helper: Database Menu (switch lokal ⇄ Turso) ─────────────────────
+async function showDbMenu(env, chatId, messageId) {
+  const { getDbInfo, dbCount } = await import('./db.js')
+  const info = await getDbInfo(env)
+  const cfg = await readJSON(env, 'BotConfig', {})
+  const b = (cfg && cfg.db) || {}
+  const isTurso = info.backend === 'turso'
+  const want = (b.mode === 'turso') ? 'turso' : 'kv'
+  let kvN = -1, tN = -1
+  try { kvN = await dbCount(env, 'kv') } catch {}
+  try { tN = await dbCount(env, 'turso') } catch {}
+  const urlTxt = b.url ? '`' + String(b.url).slice(0, 42) + '`' : '_(belum diset)_'
+  const tokTxt = b.token ? '✅ Terisi' : (env.TURSO_TOKEN ? '✅ via ENV' : '❌ Kosong')
+  let cap = '*💾 KELOLA DATABASE*\n'
+  cap += 'Aktif     : *' + (isTurso ? '🗄️ Turso' : '💾 Lokal/KV') + '*\n'
+  cap += 'Mode set  : ' + (want === 'turso' ? 'Turso' : 'Lokal/KV')
+  if (info.degraded) cap += '  ⚠️ _fallback KV (Turso gagal)_'
+  cap += '\n'
+  cap += 'Key lokal : ' + (kvN >= 0 ? kvN : '?') + '  |  Key Turso: ' + (tN >= 0 ? tN : '?') + '\n'
+  cap += 'URL       : ' + urlTxt + '\n'
+  cap += 'Token     : ' + tokTxt + (info.credSource ? ' (' + info.credSource + ')' : '') + '\n'
+  if (info.dbError) cap += '⚠️ _' + String(info.dbError).slice(0, 90) + '_\n'
+  cap += '\n_Pilih backend, lalu migrasi agar data ikut pindah._'
+  const kb = { inline_keyboard: [
+    [{ text: (!isTurso ? '✅ ' : '') + '💾 Lokal/KV', callback_data: 'adm_db_mode_kv' },
+     { text: (isTurso ? '✅ ' : '') + '🗄️ Turso', callback_data: 'adm_db_mode_turso' }],
+    [{ text: '🔗 Set URL', callback_data: 'adm_db_url' }, { text: '🔑 Set Token', callback_data: 'adm_db_token' }],
+    [{ text: '🧪 Test Koneksi', callback_data: 'adm_db_test' }],
+    [{ text: '⬆️ Migrasi → Turso', callback_data: 'adm_db_mig_up' }],
+    [{ text: '⬇️ Migrasi → Lokal', callback_data: 'adm_db_mig_down' }],
+    [{ text: '📤 Backup (Download)', callback_data: 'adm_backup_db' }],
+    [{ text: '💾 Restore (JSON)', callback_data: 'adm_load_db' }],
+    [{ text: '🔙 Kembali', callback_data: 'adm_settings' }]
+  ] }
+  await tgEditMessageText(env, chatId, messageId, cap, kb, 'Markdown')
+}
 
 // ─── Helper: Pakasir Menu ─────────────────────────────────────────────
 async function showPakasirMenu(env, chatId, messageId) {

@@ -655,9 +655,10 @@ function buildRiwayatView(userTrx, page, totalPages) {
     const id = (t.trxid || '-').replace(/[`_*\[\]]/g, '')
     const rp = 'Rp ' + Number(t.total || 0).toLocaleString('id-ID')
     if (i > 0) text += '──────────────────\n'
-    text += '*' + num + '.* `' + id + '` — ' + shortDate(t.tanggal) + '\n'
-    text += '   ' + mdSafe(t.produk || '-') + ' · ' + mdSafe(t.varian || '-') + '\n'
-    text += '   ' + rp + ' · ' + payLabel(t) + '\n'
+    text += '*' + num + '. ' + mdSafe(t.produk || '-').toUpperCase() + '*\n'
+    text += mdSafe(t.varian || '-') + ' · ' + shortDate(t.tanggal) + '\n'
+    text += '`' + id + '`\n'
+    text += rp + ' · ' + payLabel(t) + '\n'
   })
   text += '━━━━━━━━━━━━━━━━━━'
   const nav = []

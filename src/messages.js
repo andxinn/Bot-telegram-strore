@@ -632,13 +632,11 @@ function payLabel(t) {
   return 'QRIS'
 }
 
-function shortDate(iso) {
+function shortDateTime(iso) {
   if (!iso) return '-'
   try {
-    const d = new Date(iso)
-    const dd = String(d.getDate()).padStart(2, '0')
-    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'][d.getMonth()]
-    return dd + ' ' + mon + ' ' + d.getFullYear()
+    const s = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso))
+    return s.replace(',', '')
   } catch (e) { return '-' }
 }
 
@@ -655,10 +653,13 @@ function buildRiwayatView(userTrx, page, totalPages) {
     const id = (t.trxid || '-').replace(/[`_*\[\]]/g, '')
     const rp = 'Rp ' + Number(t.total || 0).toLocaleString('id-ID')
     if (i > 0) text += '──────────────────\n'
-    text += '*' + num + '. ' + mdSafe(t.produk || '-').toUpperCase() + '*\n'
-    text += mdSafe(t.varian || '-') + ' · ' + shortDate(t.tanggal) + '\n'
-    text += '`' + id + '`\n'
-    text += rp + ' · ' + payLabel(t) + '\n'
+    text += '*' + num + '.* `' + id + '`\n'
+    text += '    Produk: ' + mdSafe(t.produk || '-') + '\n'
+    text += '    Varian: ' + mdSafe(t.varian || '-') + '\n'
+    text += '    Jumlah unit: ' + (Number(t.jumlah) || 1) + '\n'
+    text += '    Total bayar: ' + rp + '\n'
+    text += '    Metode: ' + payLabel(t) + '\n'
+    text += '    Waktu: ' + shortDateTime(t.tanggal) + '\n'
   })
   text += '━━━━━━━━━━━━━━━━━━'
   const nav = []

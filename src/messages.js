@@ -613,7 +613,8 @@ async function showStockInfo(env, chatId) {
 
 async function showRiwayat(env, chatId, fromId) {
   const trx = await readJSON(env, 'Trx', [])
-  const userTrx = trx.filter(t => String(t.user_id) === String(fromId))
+  // Hanya transaksi sukses (Lunas) milik user sendiri
+  const userTrx = trx.filter(t => String(t.user_id) === String(fromId) && t.status === 'Lunas')
   if (userTrx.length === 0) {
     await tgSendMessage(env, chatId, '📜 Belum ada riwayat transaksi.')
     return
@@ -624,26 +625,41 @@ async function showRiwayat(env, chatId, fromId) {
   await sendTextCard(env, chatId, view.text, view.keyboard)
 }
 
+function payLabel(t) {
+  // Tampilkan hanya QRIS / Saldo — nama gateway disembunyikan
+  const m = String(t.payment_method || '')
+  if (/saldo/i.test(m)) return 'Saldo'
+  return 'QRIS'
+}
+
+function shortDate(iso) {
+  if (!iso) return '-'
+  try {
+    const d = new Date(iso)
+    const dd = String(d.getDate()).padStart(2, '0')
+    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'][d.getMonth()]
+    return dd + ' ' + mon + ' ' + d.getFullYear()
+  } catch (e) { return '-' }
+}
+
 function buildRiwayatView(userTrx, page, totalPages) {
   const PER_PAGE = 5
   const pg = Math.min(Math.max(1, page), totalPages)
+  const items = userTrx.slice().reverse()
   const start = (pg - 1) * PER_PAGE
-  const items = userTrx.slice().reverse().slice(start, start + PER_PAGE)
-  let text = '╭───〔 📜 RIWAYAT TRANSAKSI 〕\n'
-  text += '┊ 📊 Halaman *' + pg + '* dari *' + totalPages + '* (Total ' + userTrx.length + ' Trx)\n'
-  let itemNum = start + 1
-  for (const t of items) {
-    const tgl = t.tanggal ? formatWIB(t.tanggal) : '-'
-    const status = t.status === 'Lunas' ? '✓ *Lunas*' : (t.status ? ('⚠️ *' + mdSafe(t.status) + '*') : '-')
-    const method = t.payment_method ? mdSafe(t.payment_method) : 'Saldo'
-    text += '├───────────────────\n'
-    text += '┊ *' + (itemNum++) + '.* 🆔 `' + (t.trxid || '-') + '`\n'
-    text += '┊ ☰ *' + mdSafe(t.produk || '-') + '* (' + mdSafe(t.varian || '-') + ')\n'
-    text += '┊ 💵 *Rp ' + (t.total || 0).toLocaleString('id-ID') + '* (' + (t.jumlah || 1) + ' pcs)\n'
-    text += '┊ 📅 ' + tgl + '\n'
-    text += '┊ 💳 ' + method + ' · ' + status + '\n'
-  }
-  text += '╰───────────────────'
+  const slice = items.slice(start, start + PER_PAGE)
+  let text = 'RIWAYAT TRANSAKSI · ' + userTrx.length + ' sukses · hal ' + pg + '/' + totalPages + '\n'
+  text += '━━━━━━━━━━━━━━━━━━\n'
+  slice.forEach((t, i) => {
+    const num = start + i + 1
+    const id = (t.trxid || '-').replace(/[`_*\[\]]/g, '')
+    const rp = 'Rp ' + Number(t.total || 0).toLocaleString('id-ID')
+    if (i > 0) text += '──────────────────\n'
+    text += '*' + num + '.* `' + id + '` — ' + shortDate(t.tanggal) + '\n'
+    text += '   ' + mdSafe(t.produk || '-') + ' · ' + mdSafe(t.varian || '-') + '\n'
+    text += '   ' + rp + ' · ' + payLabel(t) + '\n'
+  })
+  text += '━━━━━━━━━━━━━━━━━━'
   const nav = []
   if (pg > 1) nav.push({ text: '⬅️ Sebelum', callback_data: 'riwayat_page_' + (pg - 1) })
   if (pg < totalPages) nav.push({ text: 'Lanjut ➡️', callback_data: 'riwayat_page_' + (pg + 1) })

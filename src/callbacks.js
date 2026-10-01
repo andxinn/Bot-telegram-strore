@@ -1141,7 +1141,7 @@ async function handleCallbackQuery(env, cq) {
   if (data.startsWith('riwayat_page_')) {
     const rwPage = parseInt(data.replace('riwayat_page_', ''))
     const allTrx = await readJSON(env, 'Trx', [])
-    const myTrx = allTrx.filter(t => String(t.user_id) === String(fromId))
+    const myTrx = allTrx.filter(t => String(t.user_id) === String(fromId) && t.status === 'Lunas')
     const PER_PAGE = 5
     const totalPg = Math.ceil(myTrx.length / PER_PAGE)
     if (rwPage < 1 || rwPage > totalPg) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Halaman tidak tersedia.', true); return }

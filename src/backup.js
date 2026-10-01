@@ -5,11 +5,14 @@ import { getDate } from './helpers.js'
 
 async function autoBackup(env) {
   try {
+    const cfg = await readJSON(env, 'BotConfig', {}).catch(() => ({}))
+    const want = Number((cfg && cfg.JamBackup) ?? env.JAM_BACKUP ?? 6)
+    if (Number.isFinite(want) && (new Date().getUTCHours() + 7) % 24 !== want) return
     const keys = [
       'Kategori', 'Produk', 'SnK', 'Trx', 'UserList', 'Role', 
       'BannedUser', 'Voucher', 'VoucherBatch', 'VoucherAudit', 
       'OrderCounter', 'BotConfig', 'StokKeluar', 'StokBaru', 
-      'FlashSale', 'FlashSaleHistory'
+      'FlashSale', 'FlashSaleHistory', 'Tickets', 'SessionDeposit'
     ]
     const backup = {}
     for (const key of keys) {

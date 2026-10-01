@@ -474,7 +474,14 @@ async function handleCommand(env, msg) {
   if (command === '/config') {
     if (!(await checkOwnerCommand(env, msg))) return
     const config = await readJSON(env, 'BotConfig', {})
-    let text = '\u2699\ufe0f *Config*\n\n```\nNamaBot: ' + NamaBot + '\nStoreName: ' + StoreName + '\nOwnerID: ' + OwnerID + '\nInvoiceLogger: ' + (InvoiceLogger || '(kosong)') + '\nMode: ' + Mode + '\nSimulatePayment: ' + SimulatePayment + '\n\nKV Config: ' + JSON.stringify(config, null, 2) + '\n```'
+    // Redact: token Turso tidak boleh tampil di chat
+    let kvText = JSON.stringify(config, null, 2)
+    try {
+      const safe = JSON.parse(JSON.stringify(config))
+      if (safe.db && typeof safe.db === 'object' && safe.db.token) safe.db.token = '[REDACTED]'
+      kvText = JSON.stringify(safe, null, 2)
+    } catch (e) {}
+    let text = '\u2699\ufe0f *Config*\n\n```\nNamaBot: ' + NamaBot + '\nStoreName: ' + StoreName + '\nOwnerID: ' + OwnerID + '\nInvoiceLogger: ' + (InvoiceLogger || '(kosong)') + '\nMode: ' + Mode + '\nSimulatePayment: ' + SimulatePayment + '\n\nKV Config: ' + kvText + '\n```'
     await tgSendMessage(env, chatId, text, null, 'Markdown')
     return
   }
@@ -485,12 +492,22 @@ async function handleCommand(env, msg) {
     if (!input.includes('|')) { await tgSendMessage(env, chatId, 'Format: /setconfig Key|Value'); return }
     const [key, ...valueParts] = input.split('|')
     const value = valueParts.join('|').trim()
+    const k = key.trim()
+    // Allowlist: hanya key yang dikenal, dengan validasi tipe
+    const NUM_KEYS = ['JamBackup', 'OwnerID']
+    const STR_KEYS = ['NamaBot', 'StoreName', 'InvoiceLogger', 'ChannelLog', 'StoreChannel', 'CS', 'orderBotName', 'caraOrderText', 'successSticker']
+    if (!NUM_KEYS.includes(k) && !STR_KEYS.includes(k)) { await tgSendMessage(env, chatId, '⚠️ Key tidak dikenal: ' + k); return }
     const config = await readJSON(env, 'BotConfig', {})
-    if (key === 'JamBackup' || key === 'OwnerID') config[key.trim()] = parseInt(value)
-    else config[key.trim()] = value
+    if (NUM_KEYS.includes(k)) {
+      const n = parseInt(value)
+      if (!Number.isFinite(n)) { await tgSendMessage(env, chatId, '⚠️ Nilai harus angka: ' + k); return }
+      config[k] = n
+    } else {
+      config[k] = value
+    }
     await writeJSON(env, 'BotConfig', config)
     await initConfig(env)
-    await tgSendMessage(env, chatId, '\u2705 Config ' + key.trim() + ' = ' + value)
+    await tgSendMessage(env, chatId, '\u2705 Config ' + k + ' = ' + value)
     return
   }
 

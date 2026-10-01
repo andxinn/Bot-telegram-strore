@@ -1,4 +1,5 @@
 import { readJSON, writeJSON, writeText, deleteKey, existsKey } from './kv.js'
+import { dbPutIfAbsent } from './db.js'
 import { OwnerID } from './config.js'
 
 async function getUserList(env) {
@@ -34,27 +35,43 @@ async function addUser(env, chatId, username) {
 }
 
 async function addSaldo(env, chatId, amount) {
-  const users = await getUserList(env)
-  const user = users.find(u => String(u.chatId) === String(chatId))
-  if (user) {
-    user.balance = (user.balance || 0) + amount
-    await saveUserList(env, users)
-    return user.balance
+  const amt = Number(amount)
+  if (!Number.isFinite(amt)) return null
+  const lk = 'saldo_' + chatId
+  if (!(await acquireLock(env, lk, 5))) return null
+  try {
+    const users = await getUserList(env)
+    const user = users.find(u => String(u.chatId) === String(chatId))
+    if (user) {
+      user.balance = Number(user.balance || 0) + amt
+      await saveUserList(env, users)
+      return user.balance
+    }
+    return null
+  } finally {
+    await releaseLock(env, lk)
   }
-  return null
 }
 
 async function minSaldo(env, chatId, amount) {
-  const users = await getUserList(env)
-  const user = users.find(u => String(u.chatId) === String(chatId))
-  if (user) {
-    const currentBalance = user.balance || 0
-    if (currentBalance < amount) return null // saldo tidak cukup
-    user.balance = currentBalance - amount
-    await saveUserList(env, users)
-    return user.balance
+  const amt = Number(amount)
+  if (!Number.isFinite(amt)) return null
+  const lk = 'saldo_' + chatId
+  if (!(await acquireLock(env, lk, 5))) return null
+  try {
+    const users = await getUserList(env)
+    const user = users.find(u => String(u.chatId) === String(chatId))
+    if (user) {
+      const currentBalance = Number(user.balance || 0)
+      if (currentBalance < amt) return null // saldo tidak cukup
+      user.balance = currentBalance - amt
+      await saveUserList(env, users)
+      return user.balance
+    }
+    return null
+  } finally {
+    await releaseLock(env, lk)
   }
-  return null
 }
 
 async function cekSaldo(env, chatId) {
@@ -122,10 +139,15 @@ async function delBan(env, sender) {
 }
 
 // --- Action Lock System: cegah double-submit ---
+// dbPutIfAbsent atomic di Turso; KV lokal best-effort (fallback lama tetap dipakai).
 async function acquireLock(env, key, ttlSeconds = 5) {
   const lockKey = 'lock_' + key
+  const ttl = Math.max(1, Math.min(86400, Number(ttlSeconds) || 5))
+  if (typeof dbPutIfAbsent === 'function') {
+    try { return await dbPutIfAbsent(env, lockKey, '1', { expirationTtl: ttl }) } catch (e) {}
+  }
   if (await existsKey(env, lockKey)) return false
-  await writeText(env, lockKey, '1', { expirationTtl: ttlSeconds })
+  await writeText(env, lockKey, '1', { expirationTtl: ttl })
   return true
 }
 

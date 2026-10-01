@@ -423,7 +423,7 @@ async function handleCallbackQuery(env, cq) {
   if (data.startsWith('dpi_')) {
     const variantId = parseInt(data.replace('dpi_', ''))
     const produk = await readJSON(env, 'Produk', [])
-    const p = produk.find(pr => pr.id === variantId)
+    const p = produk.find(pr => String(pr.id) === String(variantId))
     if (!p) { await tgAnswerCallbackQuery(env, cqId, 'Varian tidak ditemukan.', true); return }
     const kategori = await readJSON(env, 'Kategori', [])
     const kat = kategori.find(k => k.produkId === p.category)
@@ -626,7 +626,15 @@ async function handleCallbackQuery(env, cq) {
       const prod = allP.find(pr => String(pr.id) === String(psProductId))
       if (!prod) { await releaseLock(env, saldoLock); await releaseLock(env, stockLock); await tgSendMessage(env, chatId, '❌ Produk tidak ditemukan.'); return }
       const jml = psJumlah || os.jumlahPesanan || 1
-      const tot = (os.price || prod.price) * jml
+      // Re-validasi harga flash sale: bila sudah expired, pakai harga normal (jangan harga sale basi)
+      let unitPrice = os.price || prod.price
+      try {
+        if (os.flashSaleExpiresAt && Date.now() > Number(os.flashSaleExpiresAt)) {
+          const { getEffectivePrice } = await import('./user.js')
+          unitPrice = (await getEffectivePrice(env, prod.id, prod.price)).price
+        }
+      } catch (e) {}
+      const tot = unitPrice * jml
       if (!prod.stok || prod.stok.length < jml) {
         const { sendTxLog } = await import('./messages.js')
         await sendTxLog(env, {
@@ -728,7 +736,15 @@ async function handleCallbackQuery(env, cq) {
       const prod2 = allP2.find(pr => String(pr.id) === String(pqProductId))
       if (!prod2) { await releaseLock(env, qrisLock); await tgSendMessage(env, chatId, '❌ Produk tidak ditemukan.'); return }
       const jml2 = pqJumlah || os2.jumlahPesanan || 1
-      const tot2 = (os2.price || prod2.price) * jml2
+      // Re-validasi harga flash sale (samakan jalur saldo)
+      let unitPrice2 = os2.price || prod2.price
+      try {
+        if (os2.flashSaleExpiresAt && Date.now() > Number(os2.flashSaleExpiresAt)) {
+          const { getEffectivePrice } = await import('./user.js')
+          unitPrice2 = (await getEffectivePrice(env, prod2.id, prod2.price)).price
+        }
+      } catch (e) {}
+      const tot2 = unitPrice2 * jml2
       if (!prod2.stok || prod2.stok.length < jml2) {
         await releaseLock(env, qrisLock); await tgSendMessage(env, chatId, '❌ Stok habis.'); return
       }
@@ -872,7 +888,8 @@ async function handleCallbackQuery(env, cq) {
             provider: 'duitku', duitku_amount: chargeAmtDk, duitku_provider: gwQ.qrisProvider,
             duitku_reference: createdDk.reference, duitku_qr: createdDk.qrString,
             duitku_paymentUrl: createdDk.paymentUrl,
-            duitku_gw: { merchantCode: gwQ.merchantCode, apiKey: gwQ.apiKey, mode: gwQ.mode, qrisProvider: gwQ.qrisProvider },
+            // apiKey tidak disimpan di sesi — diambil dari config live (resolveGw di payments.js)
+            duitku_gw: { merchantCode: gwQ.merchantCode, mode: gwQ.mode, qrisProvider: gwQ.qrisProvider },
             expiryMinutes: dkExpMin,
             display_total: chargeAmtDk,
             // v9update18: flash sale metadata (utk auto-cancel di processPaymentSuccess)
@@ -957,7 +974,7 @@ async function handleCallbackQuery(env, cq) {
           total_amount: displayTotal, expired: expiredTime(), key: qMsgKey,
           nama: fromName, username: fromUsername,
           provider: 'pakasir', pakasir_amount: displayTotal, pakasir_method: gwQ.method,
-          pakasir_gw: { slug: gwQ.slug, apiKey: gwQ.apiKey, method: gwQ.method, mode: gwQ.mode },
+          pakasir_gw: { slug: gwQ.slug, method: gwQ.method, mode: gwQ.mode },
           display_total: displayTotal,
           // v9update18: flash sale metadata (utk auto-cancel di processPaymentSuccess)
           flashSaleId: os2.flashSaleId || null,
@@ -978,6 +995,8 @@ async function handleCallbackQuery(env, cq) {
     const qCancelSes = cancelSessions.find(ss => ss.id === qTrxId)
     if (qCancelSes && qCancelSes.depositDetails) {
       const d = qCancelSes.depositDetails
+      // Hanya pemilik sesi yang boleh membatalkan
+      if (String(d.userId) !== String(fromId)) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan sesi Anda.', true); return }
       if (d.provider === 'pakasir' && d.pakasir_gw) {
         try { await pakasirCancel(d.pakasir_gw, qTrxId, d.pakasir_amount) } catch (e) {}
       }
@@ -993,7 +1012,11 @@ async function handleCallbackQuery(env, cq) {
       })
     }
     await writeJSON(env, 'SessionDeposit', cancelSessions.filter(ss => ss.id !== qTrxId))
-    await deleteKey(env, 'orderState_' + fromId)
+    // Hapus orderState milik pemilik sesi (bukan pembatal — kini sama setelah guard di atas)
+    try {
+      const ownerId = (qCancelSes && qCancelSes.depositDetails && qCancelSes.depositDetails.userId) || fromId
+      await deleteKey(env, 'orderState_' + ownerId)
+    } catch (e) {}
     try { await tgDeleteMessage(env, chatId, messageId) } catch (e) {}
     await tgSendMessage(env, chatId, '❌ *Pesanan QRIS dibatalkan.*', getMainMenuKeyboard())
     return
@@ -1009,27 +1032,43 @@ async function handleCallbackQuery(env, cq) {
     if (!smDetails || String(smDetails.userId) !== String(fromId)) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan sesi Anda.', true); return }
     // ─── Duitku branch: self-settle di sandbox ───
     if (smDetails.provider === 'duitku' && smDetails.duitku_gw && smDetails.duitku_gw.mode === 'sandbox') {
-      await writeJSON(env, 'SessionDeposit', smSessions.filter(s => s.id !== smTrxId))
-      const { processPaymentSuccess } = await import('./payments.js')
-      await processPaymentSuccess(env, smSession, {
-        status: 'completed', reference: smDetails.duitku_reference || 'SIM-DK-' + Date.now(),
-        amount: smDetails.duitku_amount, gateway: 'duitku'
-      })
+      const smLock = 'pay_process_' + smTrxId
+      if (!(await acquireLock(env, smLock, 15))) { await tgAnswerCallbackQuery(env, cqId, '⏳ Pembayaran sedang diverifikasi oleh sistem, mohon tunggu...', true); return }
+      try {
+        const fresh = await readJSON(env, 'SessionDeposit', [])
+        if (!fresh.find(s => s.id === smTrxId)) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Sesi sudah selesai diproses.', true); return }
+        await writeJSON(env, 'SessionDeposit', fresh.filter(s => s.id !== smTrxId))
+        const { processPaymentSuccess } = await import('./payments.js')
+        await processPaymentSuccess(env, smSession, {
+          status: 'completed', reference: smDetails.duitku_reference || 'SIM-DK-' + Date.now(),
+          amount: smDetails.duitku_amount, gateway: 'duitku'
+        })
+      } finally {
+        await releaseLock(env, smLock)
+      }
       await tgAnswerCallbackQuery(env, cqId, '✅ Simulasi Duitku sukses! Pesanan diproses.', true)
       return
     }
     if (!smDetails || smDetails.provider !== 'pakasir' || !smDetails.pakasir_gw || smDetails.pakasir_gw.mode !== 'sandbox') {
       await tgAnswerCallbackQuery(env, cqId, '⚠️ Simulasi hanya untuk mode sandbox.', true); return
     }
-    await pakasirSimulate(smDetails.pakasir_gw, smTrxId, smDetails.pakasir_amount)
-    const smTrx = await pakasirDetail(smDetails.pakasir_gw, smTrxId, smDetails.pakasir_amount)
-    if (smTrx && smTrx.status === 'completed') {
-      await writeJSON(env, 'SessionDeposit', smSessions.filter(s => s.id !== smTrxId))
-      const { processPaymentSuccess } = await import('./payments.js')
-      await processPaymentSuccess(env, smSession, smTrx)
-      await tgAnswerCallbackQuery(env, cqId, '✅ Simulasi sukses! Pesanan diproses.', true)
-    } else {
-      await tgAnswerCallbackQuery(env, cqId, '⏳ Simulasi terkirim, status belum completed. Coba Cek Pembayaran.', true)
+    const smLockP = 'pay_process_' + smTrxId
+    if (!(await acquireLock(env, smLockP, 15))) { await tgAnswerCallbackQuery(env, cqId, '⏳ Pembayaran sedang diverifikasi oleh sistem, mohon tunggu...', true); return }
+    try {
+      const freshP = await readJSON(env, 'SessionDeposit', [])
+      if (!freshP.find(s => s.id === smTrxId)) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Sesi sudah selesai diproses.', true); return }
+      await pakasirSimulate(smDetails.pakasir_gw, smTrxId, smDetails.pakasir_amount)
+      const smTrx = await pakasirDetail(smDetails.pakasir_gw, smTrxId, smDetails.pakasir_amount)
+      if (smTrx && smTrx.status === 'completed') {
+        await writeJSON(env, 'SessionDeposit', freshP.filter(s => s.id !== smTrxId))
+        const { processPaymentSuccess } = await import('./payments.js')
+        await processPaymentSuccess(env, smSession, smTrx)
+        await tgAnswerCallbackQuery(env, cqId, '✅ Simulasi sukses! Pesanan diproses.', true)
+      } else {
+        await tgAnswerCallbackQuery(env, cqId, '⏳ Simulasi terkirim, status belum completed. Coba Cek Pembayaran.', true)
+      }
+    } finally {
+      await releaseLock(env, smLockP)
     }
     return
   }
@@ -1058,6 +1097,15 @@ async function handleCallbackQuery(env, cq) {
       }
       try {
         const expiredDate = parseExpiredWIB(ckDetails.expired)
+        const isExpInvalid = expiredDate instanceof Date ? isNaN(expiredDate.getTime()) : !expiredDate
+        if (isExpInvalid) {
+          console.warn('[cekbayar] expired invalid, anggap kedaluwarsa: ' + ckTrxId)
+          const { handleExpiredPayment } = await import('./payments.js')
+          await handleExpiredPayment(env, ckSession)
+          await writeJSON(env, 'SessionDeposit', ckSessions.filter(s => s.id !== ckTrxId))
+          await tgAnswerCallbackQuery(env, cqId, '⏱️ Sesi ini sudah kadaluarsa.', true)
+          return
+        }
         if (new Date() > expiredDate) {
           const { handleExpiredPayment } = await import('./payments.js')
           await handleExpiredPayment(env, ckSession)
@@ -1080,8 +1128,11 @@ async function handleCallbackQuery(env, cq) {
         const { saweriaStatus } = await import('./saweria.js')
         const stat = await saweriaStatus(null, ckDetails.saweria_id)
         if (stat && stat.ok && stat.status === 'PAID') {
-          if (stat.amount === undefined) {
-            console.warn('[cekbayar] Saweria PAID tanpa nominal, terima berdasar session: ' + ckTrxId)
+          if (stat.amount === undefined || stat.amount === null) {
+            // Fail-closed: gateway tak bawa nominal → jangan fulfill, minta cek manual
+            console.warn('[cekbayar] Saweria PAID tanpa nominal, tolak: ' + ckTrxId)
+            await tgAnswerCallbackQuery(env, cqId, '⚠️ Status lunas tapi nominal tak terbaca. Hubungi admin.', true)
+            return
           } else if (Number(stat.amount) !== Number(ckDetails.total_amount)) {
             await tgAnswerCallbackQuery(env, cqId, '⚠️ Nominal tidak cocok. Hubungi admin.', true)
             return
@@ -1100,7 +1151,13 @@ async function handleCallbackQuery(env, cq) {
         const { duitkuStatus } = await import('./duitku.js')
         const stat = await duitkuStatus(ckDetails.duitku_gw, ckTrxId)
         if (stat && String(stat.statusCode) === '00') {
-          if (stat.amount !== undefined && stat.amount !== null && Number(stat.amount) !== Number(ckDetails.duitku_amount)) {
+          if (stat.amount === undefined || stat.amount === null) {
+            // Fail-closed: nominal tak terbaca → jangan fulfill
+            console.warn('[cekbayar] Duitku success tanpa nominal, tolak: ' + ckTrxId)
+            await tgAnswerCallbackQuery(env, cqId, '⚠️ Status lunas tapi nominal tak terbaca. Hubungi admin.', true)
+            return
+          }
+          if (Number(stat.amount) !== Number(ckDetails.duitku_amount)) {
             await tgAnswerCallbackQuery(env, cqId, '⚠️ Nominal tidak cocok. Hubungi admin.', true)
             return
           }

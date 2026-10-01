@@ -134,7 +134,7 @@ async function tgSendPhotoBase64(env, chatId, base64String, caption, keyboard = 
     const res = await fetch(TG_API(env.BOT_TOKEN) + '/sendPhoto', { method: 'POST', body: form })
     return await res.json()
   } catch (e) {
-    return await tgSendMessage(env, chatId, caption || '', keyboard, parseMode)
+    return await tgSendMessage(env, chatId, caption || '📷 Foto', keyboard, parseMode)
   }
 }
 

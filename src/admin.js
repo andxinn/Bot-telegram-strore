@@ -1398,6 +1398,10 @@ export async function handleAdminState(env, msg, state) {
 
     try {
       const doc = msg.document
+      const maxSize = 5 * 1024 * 1024
+      if (doc.file_size && doc.file_size > maxSize) {
+        throw new Error('File backup terlalu besar (maks 5MB).')
+      }
       const fileInfo = await tgGetFile(env, doc.file_id)
       if (!fileInfo || !fileInfo.file_path) {
         throw new Error('Gagal mendapatkan informasi file dari Telegram.')
@@ -1406,10 +1410,13 @@ export async function handleAdminState(env, msg, state) {
       if (!fileContent) {
         throw new Error('File kosong atau gagal diunduh.')
       }
+      if (fileContent.length > maxSize) {
+        throw new Error('File backup terlalu besar (maks 5MB).')
+      }
       const data = JSON.parse(fileContent)
 
       // Overwrite HANYA key yang tervalidasi; token rahasia tidak ikut dipulihkan
-      const ALLOWED_RESTORE = ['Kategori', 'Produk', 'SnK', 'Trx', 'UserList', 'Role', 'BannedUser', 'Voucher', 'VoucherBatch', 'VoucherAudit', 'OrderCounter', 'BotConfig', 'StokKeluar', 'StokBaru', 'FlashSale', 'FlashSaleHistory']
+      const ALLOWED_RESTORE = ['Kategori', 'Produk', 'SnK', 'Trx', 'UserList', 'Role', 'BannedUser', 'Voucher', 'VoucherBatch', 'VoucherAudit', 'OrderCounter', 'BotConfig', 'StokKeluar', 'StokBaru', 'FlashSale', 'FlashSaleHistory', 'Tickets', 'SessionDeposit']
       if (!data || typeof data !== 'object') throw new Error('Format database backup tidak dikenali.')
       if (!Array.isArray(data.Kategori) && !Array.isArray(data.Produk) && !Array.isArray(data.UserList)) {
         throw new Error('Format database backup tidak dikenali.')
@@ -3281,11 +3288,10 @@ export async function handleAdminCallback(env, cq) {
       const cfgT = await readJSON(env, 'BotConfig', {})
       const bT = (cfgT && cfgT.db) || {}
       const urlT = env.TURSO_URL || bT.url || ''
-      if (urlT) {
-        const tokenT = env.TURSO_TOKEN || bT.token || ''
-        const t = await testConn(urlT, tokenT)
-        if (!t.ok) { await tgAnswerCallbackQuery(env, cqId, '❌ Turso tak terjangkau: ' + (t.error || 'gagal').slice(0, 70), true); return }
-      }
+      if (!urlT) { await tgAnswerCallbackQuery(env, cqId, '⚠️ URL Turso kosong. Isi dulu via menu database.', true); return }
+      const tokenT = env.TURSO_TOKEN || bT.token || ''
+      const t = await testConn(urlT, tokenT)
+      if (!t.ok) { await tgAnswerCallbackQuery(env, cqId, '❌ Turso tak terjangkau: ' + (t.error || 'gagal').slice(0, 70), true); return }
     }
     await saveDbMode(env, to)
     const { resetDbCache } = await import('./db.js')
@@ -3340,7 +3346,7 @@ export async function handleAdminCallback(env, cq) {
 
   if (data === 'adm_backup_db') {
     try {
-      const keys = ['Kategori', 'Produk', 'SnK', 'Trx', 'UserList', 'Role', 'BannedUser', 'Voucher', 'VoucherBatch', 'VoucherAudit', 'OrderCounter', 'BotConfig', 'StokKeluar', 'StokBaru', 'FlashSale', 'FlashSaleHistory']
+      const keys = ['Kategori', 'Produk', 'SnK', 'Trx', 'UserList', 'Role', 'BannedUser', 'Voucher', 'VoucherBatch', 'VoucherAudit', 'OrderCounter', 'BotConfig', 'StokKeluar', 'StokBaru', 'FlashSale', 'FlashSaleHistory', 'Tickets', 'SessionDeposit']
       const backup = {}
       for (const key of keys) {
         backup[key] = await readJSON(env, key, null)

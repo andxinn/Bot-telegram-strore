@@ -663,7 +663,7 @@ async function handleCallbackQuery(env, cq) {
       const taken = pFresh.stok.splice(0, jml)
       await writeJSON(env, 'Produk', freshP)
       const botNm = orderBotName || NamaBot || 'BOT'
-      const trxId = generateOrderId(botNm)
+      const trxId = await generateUniqueOrderId(env, botNm)
       const now = new Date().toISOString()
       const trxList = await readJSON(env, 'Trx', [])
       trxList.push({ trxid: trxId, user_id: fromId, username: fromUsername, produk: os.produk, varian: os.varian, jumlah: jml, total: tot, tanggal: now, payment_method: 'Saldo', status: 'Lunas' })
@@ -749,7 +749,7 @@ async function handleCallbackQuery(env, cq) {
         await releaseLock(env, qrisLock); await tgSendMessage(env, chatId, '❌ Stok habis.'); return
       }
       const botNm2 = orderBotName || NamaBot || 'BOT'
-      const trxId2 = generateOrderId(botNm2)
+      const trxId2 = await generateUniqueOrderId(env, botNm2)
       const agQ = await getActiveGateway(env)
       const gwQ = agQ.gw
       // ─── Saweria branch (QRIS-only) ───

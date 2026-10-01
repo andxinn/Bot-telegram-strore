@@ -318,9 +318,9 @@ async function handleMessage(env, msg) {
   if (text === '🔍 Cek Transaksi' || text === 'Cek Transaksi') {
     const bcfg = await readJSON(env, 'BotConfig', {})
     const rawPrefix = bcfg.orderBotName || bcfg.NamaBot || orderBotName || NamaBot || 'BOT'
-    const prefix = (rawPrefix || 'BOT').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'BOT'
+    const prefix = (rawPrefix || 'BOT').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'BOT'
     const sent = await tgSendMessage(env, chatId,
-      '🔍 *Cek Status Transaksi*\n\nMasukkan ID Pesanan kamu (contoh: `' + prefix + '-ORDERID-220726064513`):',
+      '🔍 *Cek Status Transaksi*\n\nMasukkan ID Pesanan kamu (contoh: `' + prefix + '-241026-A1B2`):',
       null, 'Markdown')
     const promptMid = sent?.result?.message_id
     await writeJSON(env, 'cekTrxState_' + fromId, { step: 'waiting', promptMid })

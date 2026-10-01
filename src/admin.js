@@ -1074,13 +1074,13 @@ export async function handleAdminState(env, msg, state) {
     return
   }
   if (state.action === 'settings_botname') {
-    const clean = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12)
+    const clean = text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)
     if (clean.length < 2) { await tgSendMessage(env, chatId, '⚠️ Min 2 karakter.'); return }
     const cfg = await readJSON(env, 'BotConfig', {})
     cfg.orderBotName = clean
     await writeJSON(env, 'BotConfig', cfg)
     await deleteKey(env, 'adminState_' + fromId)
-    await tgSendMessage(env, chatId, '✅ Nama Bot diperbarui: *' + clean + '*\nContoh ID: `' + clean + '-ORDERID-220726064513`', adminMainPanel(), 'Markdown')
+    await tgSendMessage(env, chatId, '✅ Nama Bot diperbarui: *' + clean + '*\nContoh ID: `' + clean + '-241026-A1B2`', adminMainPanel(), 'Markdown')
     return
   }
   if (state.action === 'settings_banner_start') {
@@ -3838,7 +3838,7 @@ export async function handleAdminCallback(env, cq) {
     const bcfg = await readJSON(env, 'BotConfig', {})
     await writeJSON(env, 'adminState_' + fromId, { action: 'settings_botname' })
     await tgEditMessageText(env, chatId, messageId,
-      '*🆔 Prefix ID Order*\nSaat ini: *' + (bcfg.orderBotName || 'Belum diset') + '*\nKirim nama baru (huruf/angka max 12 karakter):\n\n_Ketik /batal jika tidak jadi._',
+      '*🆔 Prefix ID Order*\nSaat ini: *' + (bcfg.orderBotName || 'Belum diset') + '*\nKirim prefix baru (huruf/angka, 2–4 karakter):\n\n_Contoh ID: `' + (bcfg.orderBotName || 'BOT') + '-241026-A1B2`_\n_Ketik /batal jika tidak jadi._',
       { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_identity' }]] }, 'Markdown'
     )
     return

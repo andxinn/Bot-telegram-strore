@@ -1,4 +1,5 @@
 import { providerPrefixes } from './constants.js'
+import { readJSON } from './kv.js'
 
 
 // Untuk Telegram Markdown V1 - escape _ * ` [ dengan backslash (valid di V1); teks biasa tampil identik.
@@ -142,19 +143,40 @@ function boxFormat(title, lines) {
   return text
 }
 
-// --- generateOrderId: format NamaBot-ORDERID-DDMMYYHHmmss (WIB) ---
+// --- generateOrderId: format PREFIX-DDMMYY-XXXX (WIB), anti-duplikat ---
+// Pendek (14-17 char); cek unik sebelum dipakai via orderIdUnique()
 function generateOrderId(namaBot) {
-  const clean = (namaBot || 'BOT').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12) || 'BOT'
+  const clean = (namaBot || 'BOT').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'BOT'
   const now = new Date()
   const wibMs = now.getTime() + (7 * 60 * 60 * 1000)
   const wib = new Date(wibMs)
   const dd = String(wib.getUTCDate()).padStart(2, '0')
   const mo = String(wib.getUTCMonth() + 1).padStart(2, '0')
   const yy = String(wib.getUTCFullYear()).slice(2)
-  const hh = String(wib.getUTCHours()).padStart(2, '0')
-  const mi = String(wib.getUTCMinutes()).padStart(2, '0')
-  const ss = String(wib.getUTCSeconds()).padStart(2, '0')
-  return clean + '-ORDERID-' + dd + mo + yy + hh + mi + ss
+  const rand = Math.floor(Math.random() * 46656).toString(36).toUpperCase().padStart(3, '0')
+  return clean + '-' + dd + mo + yy + '-' + rand
+}
+
+// Cek ID tidak bentrok dengan Trx maupun SessionDeposit lama (semua format)
+async function orderIdUnique(env, id) {
+  try {
+    const trx = await readJSON(env, 'Trx', [])
+    if (trx.some(t => t.trxid === id)) return false
+  } catch (e) {}
+  try {
+    const ses = await readJSON(env, 'SessionDeposit', [])
+    if (ses.some(s => s.id === id)) return false
+  } catch (e) {}
+  return true
+}
+
+// Buat ID unik (retry bila tabrakan, peluang sangat kecil)
+async function generateUniqueOrderId(env, namaBot, tries = 5) {
+  for (let i = 0; i < tries; i++) {
+    const id = generateOrderId(namaBot)
+    if (await orderIdUnique(env, id)) return id
+  }
+  return generateOrderId(namaBot) + '-' + Math.floor(Math.random() * 900 + 100)
 }
 
 
@@ -162,5 +184,5 @@ export {
   escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam,
   chunkArray, sleep, toCRC16, generateTrxId, generateOrderId, generateKodeUnik, expiredTime, parseExpiredWIB,
   generateRandomPhone, generateRandomEmail, generateRandomDonationMessage, boxFormat, loadingBar,
-  generateTicketId
+  generateTicketId, orderIdUnique, generateUniqueOrderId
 }

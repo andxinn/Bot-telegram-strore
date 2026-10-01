@@ -106,6 +106,7 @@ async function handleCommand(env, msg) {
     const totalQty = userTrx.reduce((s, t) => s + (t.jumlah || 0), 0)
     const totalUsers = (await getUserList(env)).length
     const soldPcs = trx.filter(t => t.status === 'Lunas').reduce((s, t) => s + (Number(t.jumlah) || 0), 0)
+    const userSpent = userTrx.filter(t => t.status === 'Lunas').reduce((s, t) => s + (Number(t.total) || 0), 0)
     const jamNow = getTanggalJam()
     const jamNum = parseInt(String(jamNow.jam).split(':')[0], 10) || 0
     let salam = '🌙 Selamat Malam'
@@ -119,14 +120,17 @@ async function handleCommand(env, msg) {
     const soldStr = soldPcs.toLocaleString('id-ID')
     const pad = (s, n) => String(s).padEnd(n, ' ')
     const caption = escapeMarkdown(
-      '╭───〔 ' + salamShort + ', ' + mdSafe(user.name) + '! 〕───\n' +
-      '┊ *👤 DETAIL USER*\n' +
+      '╭───〔 ' + salam + ' 〕───\n' +
+      '┊ \n' +
+      '👤 DETAIL USER\n' +
       '┊ `' + pad('Username', 9) + ' : ' + uname + '`\n' +
-      '┊ `' + pad('ID', 9) + ' : ' + user.chatId + '`\n' +
       '┊ `' + pad('Transaksi', 9) + ' : ' + totalQty + 'x`\n' +
+      '┊ `' + pad('Belanja', 9) + ' : ' + formatrupiah(userSpent) + '`\n' +
       '┊ `' + pad('Saldo', 9) + ' : ' + formatrupiah(user.balance || 0) + '`\n' +
+      '┊ `' + pad('ID', 9) + ' : ' + user.chatId + '`\n' +
       '├──────────────────\n' +
-      '┊ *🏪 STATISTIK BOT*\n' +
+      '┊ \n' +
+      '🏪 STATISTIK BOT\n' +
       '┊ `' + pad('Terjual', 7) + ' : ' + soldStr + ' pcs`\n' +
       '┊ `' + pad('Pengguna', 7) + ' : ' + totalUsers + ' orang`\n' +
       '├──────────────────\n' +

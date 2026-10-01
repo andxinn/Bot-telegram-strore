@@ -105,6 +105,7 @@ async function handleCommand(env, msg) {
     const userTrx = trx.filter(t => String(t.user_id) === String(chatId))
     const totalQty = userTrx.reduce((s, t) => s + (t.jumlah || 0), 0)
     const totalUsers = (await getUserList(env)).length
+    const soldPcs = trx.filter(t => t.status === 'Lunas').reduce((s, t) => s + (Number(t.jumlah) || 0), 0)
     const jamNow = getTanggalJam()
     const jamNum = parseInt(String(jamNow.jam).split(':')[0], 10) || 0
     let salam = '🌙 Selamat Malam'
@@ -112,25 +113,24 @@ async function handleCommand(env, msg) {
     else if (jamNum >= 11 && jamNum <= 14) salam = '☀️ Selamat Siang'
     else if (jamNum >= 15 && jamNum <= 18) salam = '🌇 Selamat Sore'
     const jamHM = String(jamNow.jam).slice(0, 5)
-    const uname = (fromUsername && fromUsername !== 'Tidak ada username') ? ('`@' + fromUsername + '`') : '(belum diatur)'
+    const uname = (fromUsername && fromUsername !== 'Tidak ada username') ? ('@' + mdSafe(fromUsername)) : '(belum diatur)'
+    const salamShort = salam.replace('Selamat ', '')
+    const tglPendek = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Jakarta' })
+    const soldStr = soldPcs.toLocaleString('id-ID')
+    const pad = (s, n) => String(s).padEnd(n, ' ')
     const caption = escapeMarkdown(
-      '╭───〔 ' + salam + ' 〕───\n' +
-      '┊ 👋 Hai, ' + mdSafe(user.name) + '!\n' +
-      '┊ 👤 ' + uname + '\n' +
+      '╭───〔 ' + salamShort + ', ' + mdSafe(user.name) + '! 〕───\n' +
+      '┊ *👤 DETAIL USER*\n' +
+      '┊ `' + pad('Username', 9) + ' : ' + uname + '`\n' +
+      '┊ `' + pad('ID', 9) + ' : ' + user.chatId + '`\n' +
+      '┊ `' + pad('Transaksi', 9) + ' : ' + totalQty + 'x`\n' +
+      '┊ `' + pad('Saldo', 9) + ' : ' + formatrupiah(user.balance || 0) + '`\n' +
       '├──────────────────\n' +
-      '┊ *ID*\n' +
-      '┊ └ `' + user.chatId + '`\n' +
-      '┊ *Saldo*\n' +
-      '┊ └ ' + formatrupiah(user.balance || 0) + '\n' +
-      '┊ *Tanggal*\n' +
-      '┊ └ ' + jamNow.tanggal + '\n' +
-      '┊ *Jam*\n' +
-      '┊ └ ' + jamHM + ' WIB\n' +
+      '┊ *🏪 STATISTIK BOT*\n' +
+      '┊ `' + pad('Terjual', 7) + ' : ' + soldStr + ' pcs`\n' +
+      '┊ `' + pad('Pengguna', 7) + ' : ' + totalUsers + ' orang`\n' +
       '├──────────────────\n' +
-      '┊ *Total Transaksi*\n' +
-      '┊ └ ' + totalQty + 'x\n' +
-      '┊ *Total User Bot*\n' +
-      '┊ └ ' + totalUsers + '\n' +
+      '┊ 📅 ' + tglPendek + ' · ' + jamHM + ' WIB\n' +
       '╰──────────────────\n' +
       '\nSilakan pilih menu di bawah 👇'
     )

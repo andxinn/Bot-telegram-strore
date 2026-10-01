@@ -345,6 +345,17 @@ async function migrateKeys(env, dir) {
     }
   } catch (e) { return { ok: false, error: e.message, moved: 0, total: 0, skipped: 0, active: wantActive } }
   const total = pairs.length
+  // ── Guard: jangan timpa Turso yang sudah berisi dengan snapshot lokal basi ──
+  if (dir === 'up') {
+    if (!r.client) return { ok: false, error: 'Turso tidak terkoneksi', moved: 0, total, skipped: 0, active: wantActive }
+    try {
+      const dst = await r.client.execute('SELECT COUNT(*) AS n FROM kv')
+      const dstCount = Number(dst.rows?.[0]?.n) || 0
+      if (dstCount >= total && total > 0) {
+        return { ok: false, error: 'Turso sudah berisi (' + dstCount + ' key) — migrasi dibatalkan agar tak rollback diam-diam', moved: 0, total, skipped: 0, active: wantActive }
+      }
+    } catch (e) {}
+  }
   // ── Fase 2: tulis semua ke tujuan ──
   let moved = 0, skipped = 0
   try {

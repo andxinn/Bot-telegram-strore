@@ -1,16 +1,10 @@
 import { providerPrefixes } from './constants.js'
 
-// Untuk Telegram MarkdownV2 - escape semua karakter spesial
-function escapeMarkdownV2(text) {
-  if (!text && text !== 0) return ''
-  return String(text).replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1')
-}
 
-// Untuk Telegram Markdown V1 - HANYA escape underscore agar tidak trigger italic tidak sengaja
-// Karakter lain (.!-(){}[]) TIDAK di-escape karena V1 tidak punya mekanisme escape
+// Untuk Telegram Markdown V1 - escape _ * ` [ dengan backslash (valid di V1); teks biasa tampil identik.
 function escapeMarkdown(text) {
   if (!text && text !== 0) return ''
-  return String(text)
+  return String(text).replace(/([_*`\[\]])/g, '\\$1')
 }
 
 // Sanitasi nilai dinamis (nama produk/varian/user) agar tidak merusak Markdown V1
@@ -29,7 +23,7 @@ function formatrupiah(nominal) {
 
 function formatWIB(isoString) {
   const date = new Date(isoString)
-  const options = { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }
+  const options = { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', timeZone: 'Asia/Jakarta' }
   const timeOptions = { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Jakarta' }
   const formattedDate = new Intl.DateTimeFormat('id-ID', options).format(date)
   const formattedTime = new Intl.DateTimeFormat('id-ID', timeOptions).format(date)
@@ -37,7 +31,7 @@ function formatWIB(isoString) {
 }
 
 function getDate(zone) {
-  return new Date().toLocaleString('en-US', { timeZone: zone || 'Asia/Jakarta' })
+  return new Date().toLocaleString('id-ID', { timeZone: zone || 'Asia/Jakarta' })
 }
 
 function getTanggalJam() {
@@ -70,7 +64,7 @@ function toCRC16(str) {
     }
   }
   let hex = (crc & 0xFFFF).toString(16).toUpperCase()
-  if (hex.length === 3) hex = '0' + hex
+  hex = hex.padStart(4, '0')
   return hex
 }
 
@@ -165,7 +159,7 @@ function generateOrderId(namaBot) {
 
 
 export {
-  escapeMarkdownV2, escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam,
+  escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam,
   chunkArray, sleep, toCRC16, generateTrxId, generateOrderId, generateKodeUnik, expiredTime, parseExpiredWIB,
   generateRandomPhone, generateRandomEmail, generateRandomDonationMessage, boxFormat, loadingBar,
   generateTicketId

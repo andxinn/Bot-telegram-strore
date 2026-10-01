@@ -71,6 +71,10 @@ async function initConfig(env) {
       if (kvConfig.leaderboardBanner !== undefined) leaderboardBanner = kvConfig.leaderboardBanner
       if (kvConfig.channelTicket !== undefined) channelTicket = kvConfig.channelTicket
       if (kvConfig.ChannelLog !== undefined) ChannelLog = kvConfig.ChannelLog
+      if (kvConfig.JamBackup !== undefined && kvConfig.JamBackup !== null && kvConfig.JamBackup !== '') {
+        const jb = Number(kvConfig.JamBackup)
+        if (Number.isFinite(jb) && jb >= 0 && jb <= 23) JamBackup = Math.trunc(jb)
+      }
     }
   } catch (e) {}
 }

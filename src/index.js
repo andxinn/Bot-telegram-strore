@@ -1,12 +1,12 @@
 import { initDb } from './db.js'
-import { initConfig, Mode } from './config.js'
+import { initConfig, Mode, JamBackup, WebhookSecret, DevToken } from './config.js'
 import { tgSendMessage, tgSetMyCommands } from './telegram.js'
 import { handleMessage } from './messages.js'
 import { handleCallbackQuery } from './callbacks.js'
 import { checkPendingPayments, processPaymentSuccess } from './payments.js'
 import { autoBackup, cleanupClosedTickets } from './backup.js'
 import { readJSON, writeJSON } from './kv.js'
-import { pakasirDetail, getPayCfg } from './pakasir.js'
+import { pakasirDetail, getPayCfg, amountsMatch } from './pakasir.js'
 import { duitkuStatus, duitkuVerifyCallback } from './duitku.js'
 import { acquireLock, releaseLock } from './user.js'
 
@@ -46,7 +46,8 @@ async function handlePakasirWebhook(env, body) {
     if (!session) return { ok: false, reason: 'not_found' }
     const details = session.depositDetails || {}
     if (details.provider !== 'pakasir' || !details.pakasir_gw) return { ok: false, reason: 'provider_mismatch' }
-    if (Number(details.pakasir_amount) !== amount) return { ok: false, reason: 'amount_mismatch' }
+    // ponytail: toleransi ±2 samakan cron (amountsMatch); naikkan ke strict bila Pakasir jamin exact.
+    if (!amountsMatch(details.pakasir_amount, amount)) return { ok: false, reason: 'amount_mismatch' }
     const trxDetail = await pakasirDetail(details.pakasir_gw, orderId, amount)
     if (!trxDetail || trxDetail.status !== 'completed') return { ok: false, reason: 'not_completed' }
     await writeJSON(env, 'SessionDeposit', sessions.filter(s => s.id !== orderId))
@@ -109,10 +110,13 @@ async function setupWebhook(env, url) {
   const token = env.BOT_TOKEN
   if (!token) return { ok: false, error: 'BOT_TOKEN not set' }
   const webhookUrl = url + '/webhook'
+  const secret = WebhookSecret || env.WEBHOOK_SECRET || ''
+  const body = { url: webhookUrl, allowed_updates: ['message', 'callback_query'] }
+  if (secret) body.secret_token = secret
   const res = await fetch('https://api.telegram.org/bot' + token + '/setWebhook', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'callback_query'] })
+    body: JSON.stringify(body)
   })
   const data = await res.json()
   // Set bot commands
@@ -133,6 +137,13 @@ export default {
     const url = new URL(request.url)
 
     if (url.pathname === '/webhook') {
+      const want = WebhookSecret || env.WEBHOOK_SECRET || ''
+      const got = request.headers.get('x-telegram-bot-api-secret-token') || ''
+      const isLocal = (Mode || '').toLowerCase() !== 'production' ||
+        (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+      if (!want ? !isLocal : got !== want) {
+        return new Response('Forbidden', { status: 403 })
+      }
       try {
         const update = await request.json()
         ctx.waitUntil(handleUpdate(env, update))
@@ -144,6 +155,11 @@ export default {
     }
 
     if (url.pathname === '/pakasir-webhook' && request.method === 'POST') {
+      // ponytail: Pakasir tak dokumentasikan signature webhook; gate opsional via PAKASIR_WEBHOOK_SECRET bila diset.
+      const pkSecret = env.PAKASIR_WEBHOOK_SECRET || ''
+      if (pkSecret && (request.headers.get('x-pakasir-secret') || url.searchParams.get('secret')) !== pkSecret) {
+        return new Response(JSON.stringify({ ok: false, reason: 'forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
+      }
       try {
         const body = await request.json()
         const res = await handlePakasirWebhook(env, body)
@@ -173,9 +189,10 @@ export default {
     }
 
     if (url.pathname === '/duitku-return' && request.method === 'GET') {
-      const merchantOrderId = url.searchParams.get('merchantOrderId') || ''
+      const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+      const merchantOrderId = esc(url.searchParams.get('merchantOrderId'))
       const resultCode = url.searchParams.get('resultCode') || ''
-      const reference  = url.searchParams.get('reference') || ''
+      const reference  = esc(url.searchParams.get('reference'))
       const html = '<!doctype html><meta charset="utf-8"><title>Kembali ke Bot</title>' +
         '<div style="font-family:system-ui;max-width:420px;margin:80px auto;text-align:center;padding:24px;border-radius:12px;background:#f5f7fb;color:#0f172a">' +
         '<h2>' + (resultCode === '00' ? '✅ Pembayaran diterima' : '⏳ Menunggu konfirmasi') + '</h2>' +
@@ -187,6 +204,10 @@ export default {
     }
 
     if (url.pathname === '/setup') {
+      const okSetup = [DevToken, env.DEV_TOKEN, WebhookSecret, env.WEBHOOK_SECRET].filter(Boolean)
+      if (!okSetup.length || !okSetup.includes(url.searchParams.get('secret') || '')) {
+        return new Response('Forbidden', { status: 403 })
+      }
       const proto = request.headers.get('x-forwarded-proto') || 'https'
       const host = request.headers.get('host')
       const fullUrl = proto + '://' + host
@@ -195,6 +216,10 @@ export default {
     }
 
     if (url.pathname === '/health' || url.pathname === '/') {
+      const okSetup = [DevToken, env.DEV_TOKEN, WebhookSecret, env.WEBHOOK_SECRET].filter(Boolean)
+      if (!okSetup.length || !okSetup.includes(url.searchParams.get('secret') || '')) {
+        return new Response('Forbidden', { status: 403 })
+      }
       return new Response(JSON.stringify({
         ok: true,
         mode: Mode || 'production',
@@ -212,7 +237,9 @@ export default {
     if (event.cron === '* * * * *') {
       ctx.waitUntil(checkPendingPayments(env))
     } else if (event.cron === '0 * * * *') {
-      ctx.waitUntil(autoBackup(env))
+      const wibHour = (new Date().getUTCHours() + 7) % 24
+      const wantHour = Number((await readJSON(env, 'BotConfig', {}).catch(() => ({}))).JamBackup ?? JamBackup ?? env.JAM_BACKUP ?? 6)
+      if (wibHour === wantHour) ctx.waitUntil(autoBackup(env))
       ctx.waitUntil(cleanupClosedTickets(env))
     }
   }

@@ -1,17 +1,15 @@
-import { NamaBot, StoreName, OwnerID, ChannelLog, InvoiceLogger, ChannelStore, CS, Mode, SimulatePayment, SimulateDelay, ButtonMenu, BannerFileId, bannerStartB64, bannerListB64, orderBotName, caraOrderText, leaderboardEnabled, leaderboardBanner, channelTicket } from './config.js'
+import { NamaBot, OwnerID, ChannelLog, InvoiceLogger, SimulatePayment, ButtonMenu, BannerFileId, bannerListB64, orderBotName, caraOrderText, leaderboardEnabled, leaderboardBanner, channelTicket } from './config.js'
 import { readJSON, writeJSON, readText, writeText, deleteKey, existsKey } from './kv.js'
-import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendChatAction, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile } from './telegram.js'
-import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam, chunkArray, sleep, generateTrxId, generateOrderId, expiredTime, boxFormat, loadingBar, generateTicketId } from './helpers.js'
-import { getUserList, getUser, addUser, addSaldo, minSaldo, cekSaldo, isOwner, isRegistered, getRole, isBanned } from './user.js'
-import { getMainMenuKeyboard, getProductNumberKeyboard, getReplyKeyboard } from './keyboard.js'
+import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgSendDocument, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile } from './telegram.js'
+import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getTanggalJam, sleep, generateTrxId, expiredTime, loadingBar, generateTicketId } from './helpers.js'
+import { getUserList, getUser, addUser, addSaldo, cekSaldo, isOwner, getRole, isBanned } from './user.js'
+import { getMainMenuKeyboard, getProductNumberKeyboard } from './keyboard.js'
 import { handleCommand } from './commands.js'
-import { handleAdminState, showAdminPanel, recordStokBaru, ticketAge } from './admin.js'
+import { handleAdminState, recordStokBaru, ticketAge } from './admin.js'
 import { ITEMS_PER_PAGE } from './constants.js'
-import { generateQris } from './qris.js'
 import { getActiveGateway, pakasirConfigured, calcFee, feeLabel, methodLabel, pakasirCreate, qrImageUrl } from './pakasir.js'
 import { duitkuConfigured, duitkuCreateQris, providerLabel } from './duitku.js'
 
-const pmSessions = {}
 
 async function handleMessage(env, msg) {
   if (msg.chat.type !== 'private') {
@@ -64,8 +62,8 @@ async function handleMessage(env, msg) {
           const kb = {
             inline_keyboard: [
               [
-                { text: '✓ Selesai', callback_data: 'tk_close_' + tk.ticketId, style: 'success' },
-                { text: '💬 Balas Pesan', callback_data: 'tk_follow_' + tk.ticketId, style: 'primary' }
+                { text: '✓ Selesai', callback_data: 'tk_close_' + tk.ticketId },
+                { text: '💬 Balas Pesan', callback_data: 'tk_follow_' + tk.ticketId }
               ]
             ]
           }
@@ -190,6 +188,12 @@ async function handleMessage(env, msg) {
   // Cek Transaksi input state (state dipertahankan bila ID salah ketik)
   const cekTrxSt = await readJSON(env, 'cekTrxState_' + fromId, null)
   if (cekTrxSt && cekTrxSt.step === 'waiting') {
+    if (text.trim() === '/batal') {
+      await deleteKey(env, 'cekTrxState_' + fromId)
+      if (cekTrxSt.promptMid) { try { await tgDeleteMessage(env, chatId, cekTrxSt.promptMid) } catch (e) {} }
+      await tgSendMessage(env, chatId, 'Cek transaksi dibatalkan.')
+      return
+    }
     const inputId = text.trim().slice(0, 60)
     const trxList = await readJSON(env, 'Trx', [])
     // SECURITY: hanya tampilkan trx milik user sendiri
@@ -542,8 +546,8 @@ function buildPaymentView(os, saldo, payInfo) {
   const cukup = saldo >= total
   let cap = '╭───〔 💳 PEMBAYARAN 〕\n'
   cap += '<pre>'
-  cap += 'Produk : ' + mdSafe(os.produk) + '\n'
-  cap += 'Varian : ' + mdSafe(os.varian) + '\n'
+  cap += 'Produk : ' + escH(os.produk) + '\n'
+  cap += 'Varian : ' + escH(os.varian) + '\n'
   cap += 'Jumlah : x' + os.jumlahPesanan + '\n'
   cap += '─────────────────\n'
   cap += 'Total  : Rp ' + total.toLocaleString('id-ID') + '\n'
@@ -599,13 +603,17 @@ async function showStockInfo(env, chatId) {
     return
   }
   let cap = '╭───〔 ☰ INFO STOK 〕\n'
-  cap += '┊ ⌚ ' + getDate('Asia/Jakarta') + ' WIB\n'
+  cap += '┊ ⌚ ' + getTanggalJam().tanggal + ' ' + getTanggalJam().jam + ' WIB\n'
   cap += '├──────────────────\n'
+  let skippedStock = 0
   for (const v of withStock) {
     const cnt = (v.stok ? v.stok.length : 0)
     const mark = cnt > 0 ? '✓' : '✕'
-    cap += '┊ ' + mark + ' *' + v.id + '* · ' + mdSafe(v.nameproduct) + ' ➜ ' + cnt + 'x\n'
+    const line = '┊ ' + mark + ' *' + v.id + '* · ' + mdSafe(v.nameproduct) + ' ⟜ ' + cnt + 'x\n'
+    if ((cap.length + line.length) > 3600) { skippedStock++; continue }
+    cap += line
   }
+  if (skippedStock > 0) cap += '┊ … +' + skippedStock + ' varian lainnya\n'
   cap += '╰──────────────────\n\n👉 Ketik nomor produk untuk membeli'
   const keyboard = { inline_keyboard: [[{ text: '↻ Refresh', callback_data: 'refreshh' }]] }
   await sendTextCard(env, chatId, cap, keyboard)
@@ -653,7 +661,7 @@ function buildRiwayatView(userTrx, page, totalPages) {
     const id = (t.trxid || '-').replace(/[`_*\[\]]/g, '')
     const rp = 'Rp ' + Number(t.total || 0).toLocaleString('id-ID')
     if (i > 0) text += '──────────────────\n'
-    text += '*' + num + '.* `' + id + '`\n'
+    text += '`' + num + '. ' + id + '`\n'
     text += '    Produk: ' + mdSafe(t.produk || '-') + '\n'
     text += '    Varian: ' + mdSafe(t.varian || '-') + '\n'
     text += '    Jumlah unit: ' + (Number(t.jumlah) || 1) + '\n'
@@ -687,7 +695,8 @@ async function showProfil(env, chatId, fromId) {
     if (user.age) {
       const bulanID = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
       const p = String(user.age).split('T')[0].split('-')
-      if (p.length === 3) tglGabung = parseInt(p[2], 10) + ' ' + bulanID[parseInt(p[1], 10) - 1] + ' ' + p[0]
+      const bln = parseInt(p[1], 10)
+      if (p.length === 3 && bln >= 1 && bln <= 12) tglGabung = parseInt(p[2], 10) + ' ' + bulanID[bln - 1] + ' ' + p[0]
     }
   } catch (e) {}
   let cap = '╭───〔 👤 PROFIL 〕───\n'
@@ -1305,8 +1314,7 @@ async function handleTicketState(env, msg, state) {
       let apiErrorDesc = ''
       
       try {
-        const shortId = ticketId.split('-')[1] || 'TKT'
-        const topicRes = await tgCreateForumTopic(env, logger, '🎫 [' + shortId + '] ' + fromName)
+        const topicRes = await tgCreateForumTopic(env, logger, '🎫 [' + ticketId + '] ' + fromName)
         if (topicRes && topicRes.ok && topicRes.result) {
           isTopicSuccess = true
           threadId = topicRes.result.message_thread_id
@@ -1344,7 +1352,7 @@ async function handleTicketState(env, msg, state) {
         if (photoFileId) {
           await tgSendPhoto(env, logger, photoFileId, '🖼️ Foto Lampiran dari User', null, 'Markdown', threadId)
         } else if (docFileId) {
-          await tgSendDocumentFile(env, logger, docFileId, '📄 Berkas Lampiran dari User: ' + docName, null, 'Markdown', threadId)
+          await tgSendDocumentFile(env, logger, docFileId, '📄 Berkas Lampiran dari User: ' + mdSafe(docName), null, 'Markdown', threadId)
         }
       } catch (e) {
         console.error('[Fallback Send Ticket CATCH ERROR]', e)
@@ -1354,7 +1362,7 @@ async function handleTicketState(env, msg, state) {
     // Kirim notifikasi DM ke admin/owner (tidak perlu buka grup dulu)
     try {
       const roles = await readJSON(env, 'Role', [])
-      const notifText = '🎫 <b>Tiket Baru Masuk!</b>\n<b>' + escH(newTicket.ticketId) + '</b> • 🙋 ' + escH(username) + '\n\n' + escH(textVal)
+      const notifText = '🎫 <b>Tiket Baru Masuk!</b>\n<b>' + escH(newTicket.ticketId) + '</b> • 🙋 ' + escH(userUsn) + '\n\n' + escH(textVal)
       const notifKb = {
         inline_keyboard: [[
           { text: '💬 Balas Tiket', callback_data: 'tk_adm_reply_' + newTicket.ticketId },
@@ -1455,9 +1463,8 @@ async function handleTicketState(env, msg, state) {
     if (t.logChatId && t.threadId) {
       try {
         const { tgEditForumTopic } = await import('./telegram.js')
-        const shortId = t.ticketId.split('-')[1] || 'TKT'
         const uname = t.userUsername ? t.userUsername : (t.userName || 'User')
-        await tgEditForumTopic(env, t.logChatId, t.threadId, '🎫 [' + shortId + '] ' + uname + ' • ' + ticketAge(t).label)
+        await tgEditForumTopic(env, t.logChatId, t.threadId, '🎫 [' + t.ticketId + '] ' + uname + ' • ' + ticketAge(t).label)
       } catch (e) {}
     }
 

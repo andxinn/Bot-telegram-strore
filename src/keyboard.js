@@ -41,7 +41,8 @@ function getProductNumberKeyboard(kategori = [], page = 1) {
   return { keyboard: rows, resize_keyboard: true }
 }
 
-function getReplyKeyboard(categories = []) {
+// ponytail: alias sisa untuk pemanggil di commands.js/callbacks.js; hapus saat file itu boleh disentuh.
+function getReplyKeyboard() {
   return getMainMenuKeyboard()
 }
 

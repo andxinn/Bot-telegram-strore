@@ -7,6 +7,25 @@ import { duitkuStatus } from './duitku.js'
 import { getMainMenuKeyboard } from './keyboard.js'
 import { acquireLock, releaseLock } from './user.js'
 
+async function resolveGw(env, provider, snap) {
+  // Ambil apiKey dari config live — tidak disimpan di KV bersama sesi
+  try {
+    const { getPayCfg, getGateway } = await import('./pakasir.js')
+    const live = getGateway(await getPayCfg(env), provider) || {}
+    return { ...(snap || {}), ...live }
+  } catch (e) { return snap }
+}
+
+async function clearOwnerOrderState(env, session) {
+  try {
+    const d = session.depositDetails
+    if (!d || d.type !== 'purchase' || d.userId === undefined) return
+    const cur = await readJSON(env, 'orderState_' + d.userId, null)
+    if (cur && cur.trxId && String(cur.trxId) !== String(session.id)) return
+    await deleteKey(env, 'orderState_' + d.userId)
+  } catch (e) {}
+}
+
 async function checkPendingPayments(env) {
   const sessions = await readJSON(env, 'SessionDeposit', [])
   if (sessions.length === 0) return
@@ -24,8 +43,13 @@ async function checkPendingPayments(env) {
     }
 
     try {
+      const expiredDate = parseExpiredWIB(details.expired)
+      if (expiredDate instanceof Date ? isNaN(expiredDate.getTime()) : !expiredDate) {
+        console.warn('[cron] expired invalid, anggap kedaluwarsa: ' + session.id)
+        await handleExpiredPayment(env, session)
+        continue
+      }
       try {
-        const expiredDate = parseExpiredWIB(details.expired)
         if (now > expiredDate) {
           await handleExpiredPayment(env, session)
           continue
@@ -40,8 +64,11 @@ async function checkPendingPayments(env) {
         const { saweriaStatus } = await import('./saweria.js')
         const trxStat = await saweriaStatus(null, details.saweria_id)
         if (trxStat && trxStat.ok && trxStat.status === 'PAID') {
-          if (trxStat.amount === undefined) {
-            console.warn('[cron] Saweria PAID tanpa nominal, terima berdasar session: ' + session.id)
+          if (trxStat.amount === undefined || trxStat.amount === null) {
+            // Fail-closed: nominal tak terbaca → jangan fulfill
+            console.warn('[cron] Saweria PAID tanpa nominal, tolak: ' + session.id)
+            stillPending.push(session)
+            continue
           } else if (Number(trxStat.amount) !== Number(details.total_amount)) {
             console.warn('[cron] Saweria nominal mismatch, skip: ' + session.id)
             stillPending.push(session)
@@ -59,7 +86,7 @@ async function checkPendingPayments(env) {
       }
       if (details.provider === 'pakasir' && details.pakasir_gw) {
         const { amountsMatch } = await import('./pakasir.js')
-        const trxDetail = await pakasirDetail(details.pakasir_gw, session.id, details.pakasir_amount)
+        const trxDetail = await pakasirDetail(await resolveGw(env, 'pakasir', details.pakasir_gw), session.id, details.pakasir_amount)
         if (trxDetail && trxDetail.status === 'completed') {
           if (!amountsMatch(trxDetail.total_payment ?? details.pakasir_amount, details.pakasir_amount)) {
             console.warn('[cron] Pakasir nominal mismatch, skip: ' + session.id)
@@ -71,9 +98,15 @@ async function checkPendingPayments(env) {
         }
       }
       if (details.provider === 'duitku' && details.duitku_gw) {
-        const trxStat = await duitkuStatus(details.duitku_gw, session.id)
+        const trxStat = await duitkuStatus(await resolveGw(env, 'duitku', details.duitku_gw), session.id)
         if (trxStat && String(trxStat.statusCode) === '00') {
-          if (trxStat.amount !== undefined && trxStat.amount !== null && Number(trxStat.amount) !== Number(details.duitku_amount)) {
+          if (trxStat.amount === undefined || trxStat.amount === null) {
+            // Fail-closed: nominal tak terbaca → jangan fulfill
+            console.warn('[cron] Duitku success tanpa nominal, tolak: ' + session.id)
+            stillPending.push(session)
+            continue
+          }
+          if (Number(trxStat.amount) !== Number(details.duitku_amount)) {
             console.warn('[cron] Duitku nominal mismatch, skip: ' + session.id)
             stillPending.push(session)
             continue
@@ -92,6 +125,14 @@ async function checkPendingPayments(env) {
       await releaseLock(env, lockKey)
     }
   }
+  // Merge: sesi yang lahir saat cron polling jangan ikut terhapus oleh snapshot basi
+  try {
+    const fresh = await readJSON(env, 'SessionDeposit', [])
+    const keep = new Set(stillPending.map(s => s.id))
+    for (const s of fresh) {
+      if (!keep.has(s.id) && s.status === 'pending') { stillPending.push(s); keep.add(s.id) }
+    }
+  } catch (e) {}
   await writeJSON(env, 'SessionDeposit', stillPending)
 }
 
@@ -99,7 +140,12 @@ async function handleExpiredPayment(env, session) {
   const details = session.depositDetails
   if (!details) return
   if (details.provider === 'pakasir' && details.pakasir_gw) {
-    try { const { pakasirCancel } = await import('./pakasir.js'); await pakasirCancel(details.pakasir_gw, session.id, details.pakasir_amount) } catch (e) {}
+    try { const { pakasirCancel } = await import('./pakasir.js'); await pakasirCancel(await resolveGw(env, 'pakasir', details.pakasir_gw), session.id, details.pakasir_amount) } catch (e) {}
+  }
+  // duitku: tidak ada API cancel/void — invoice tetap hidup di sisi Duitku; pembayaran telat
+  // masuk berstatus not_found (dana nyangkut, perlu refund manual). Catat agar terlacak.
+  if (details.provider === 'duitku') {
+    console.warn('[expired] invoice Duitku tak bisa di-void, sesi dibuang: ' + session.id + ' amount=' + details.duitku_amount)
   }
   // saweria: tidak ada API cancel — donasi pending akan expired sendiri di sisi Saweria
   try {
@@ -128,8 +174,22 @@ async function processPaymentSuccess(env, session, matchData) {
   if (!details) return
 
   const doneKey = 'pay_done_' + session.id
-  if (await existsKey(env, doneKey)) return
-  await writeText(env, doneKey, '1', { expirationTtl: 30 * 24 * 3600 })
+  // Klaim atomik: dbPutIfAbsent menang sekali; fallback: lock pay_done_ sebelum check-then-set
+  let claimed = false
+  try {
+    const { dbPutIfAbsent } = await import('./db.js')
+    if (typeof dbPutIfAbsent === 'function') claimed = await dbPutIfAbsent(env, doneKey, '1', { expirationTtl: 30 * 24 * 3600 })
+  } catch (e) {}
+  if (!claimed) {
+    const claimLock = 'claim_' + session.id
+    if (!(await acquireLock(env, claimLock, 10))) return
+    try {
+      if (await existsKey(env, doneKey)) return
+      await writeText(env, doneKey, '1', { expirationTtl: 30 * 24 * 3600 })
+    } finally {
+      await releaseLock(env, claimLock)
+    }
+  }
   if (details.type === 'deposit') {
     const { addSaldo, cekSaldo } = await import('./user.js')
     await addSaldo(env, details.userId, details.amount)
@@ -174,11 +234,19 @@ async function processPaymentSuccess(env, session, matchData) {
         total: refundAmt,
         reason: 'Flash Sale berakhir sebelum pembayaran (refund)'
       })
+      await clearOwnerOrderState(env, session)
       return
     }
   }
 
-  const produk = await readJSON(env, 'Produk', [])
+  // Lock stok produk (samakan jalur saldo): cegah 2 buyer QRIS oversell snapshot basi
+  const stockLock = 'pay_stock_' + details.id
+  if (!(await acquireLock(env, stockLock, 15))) { console.warn('[pay] stok lock gagal: ' + session.id); return }
+  let produk
+  try {
+    produk = await readJSON(env, 'Produk', [])
+  } catch (e) { await releaseLock(env, stockLock); return }
+  const releaseStock = async () => { try { await releaseLock(env, stockLock) } catch (e) {} }
   const p = produk.find(pr => pr.id === details.id)
   if (!p) {
     const { addSaldo, cekSaldo } = await import('./user.js')
@@ -201,6 +269,8 @@ async function processPaymentSuccess(env, session, matchData) {
       total: details.total_amount,
       reason: 'Produk dihapus admin saat pembayaran lunas (Auto-refund)'
     })
+    await clearOwnerOrderState(env, session)
+    await releaseStock()
     return
   }
   const produkIdx = produk.findIndex(pr => pr.id === details.id)
@@ -227,14 +297,24 @@ async function processPaymentSuccess(env, session, matchData) {
       total: details.total_amount,
       reason: 'Stok tidak cukup saat pembayaran lunas (Auto-refund)'
     })
+    await clearOwnerOrderState(env, session)
+    await releaseStock()
     return
   }
   const ambilStok = stokList.slice(0, jumlahPesanan)
   produk[produkIdx].stok = stokList.slice(jumlahPesanan)
   await writeJSON(env, 'Produk', produk)
-  let orderCounter = await readJSON(env, 'OrderCounter', 0)
-  orderCounter++
-  await writeJSON(env, 'OrderCounter', orderCounter)
+  await releaseStock()
+  // OrderCounter: lindungi increment dengan lock
+  if (await acquireLock(env, 'order_counter', 10)) {
+    try {
+      let orderCounter = await readJSON(env, 'OrderCounter', 0)
+      orderCounter++
+      await writeJSON(env, 'OrderCounter', orderCounter)
+    } finally {
+      await releaseLock(env, 'order_counter')
+    }
+  }
   const trx = await readJSON(env, 'Trx', [])
   trx.push({
     trxid: session.id, user_id: details.userId, produk: details.produk,
@@ -285,6 +365,7 @@ async function processPaymentSuccess(env, session, matchData) {
     fileTxtContent: fileContent,
     fileName: session.id + '.txt'
   })
+  await clearOwnerOrderState(env, session)
 }
 
 export { checkPendingPayments, processPaymentSuccess, handleExpiredPayment }

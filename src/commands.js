@@ -119,25 +119,21 @@ async function handleCommand(env, msg) {
     const tglPendek = new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Jakarta' })
     const soldStr = soldPcs.toLocaleString('id-ID')
     const pad = (s, n) => String(s).padEnd(n, ' ')
-    const caption = escapeMarkdown(
+    const caption =
       '╭───〔 ' + salam + ' 〕───\n' +
-      '┊ \n' +
-      '👤 DETAIL USER\n' +
+      '┊ 👤 DETAIL USER\n' +
       '┊ `' + pad('Username', 9) + ' : ' + uname + '`\n' +
+      '┊ `' + pad('ID', 9) + ' : ' + user.chatId + '`\n' +
       '┊ `' + pad('Transaksi', 9) + ' : ' + totalQty + 'x`\n' +
       '┊ `' + pad('Belanja', 9) + ' : ' + formatrupiah(userSpent) + '`\n' +
       '┊ `' + pad('Saldo', 9) + ' : ' + formatrupiah(user.balance || 0) + '`\n' +
-      '┊ `' + pad('ID', 9) + ' : ' + user.chatId + '`\n' +
-      '├──────────────────\n' +
-      '┊ \n' +
-      '🏪 STATISTIK BOT\n' +
-      '┊ `' + pad('Terjual', 7) + ' : ' + soldStr + ' pcs`\n' +
-      '┊ `' + pad('Pengguna', 7) + ' : ' + totalUsers + ' orang`\n' +
-      '├──────────────────\n' +
+      '┊ ──────────────────\n' +
+      '┊ 🏪 STATISTIK BOT\n' +
+      '┊ `' + pad('Terjual', 9) + ' : ' + soldStr + ' pcs`\n' +
+      '┊ `' + pad('Pengguna', 9) + ' : ' + totalUsers + ' orang`\n' +
       '┊ 📅 ' + tglPendek + ' · ' + jamHM + ' WIB\n' +
       '╰──────────────────\n' +
       '\nSilakan pilih menu di bawah 👇'
-    )
     const keyboard = getReplyKeyboard(kategori)
     if (bannerStartB64 && bannerStartB64.length > 50) {
       await tgSendPhotoBase64(env, chatId, bannerStartB64, caption, keyboard)

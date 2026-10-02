@@ -139,6 +139,10 @@ async function checkPendingPayments(env) {
 async function handleExpiredPayment(env, session) {
   const details = session.depositDetails
   if (!details) return
+  // QRIS purchase: kembalikan stok yang di-reserve saat QR dibuat
+  if (details.type === 'purchase' && details.reserved && Array.isArray(details.reserved) && details.reserved.length > 0) {
+    try { await releaseReservedStock(env, details.id, details.reserved) } catch (e) {}
+  }
   if (details.provider === 'pakasir' && details.pakasir_gw) {
     try { const { pakasirCancel } = await import('./pakasir.js'); await pakasirCancel(await resolveGw(env, 'pakasir', details.pakasir_gw), session.id, details.pakasir_amount) } catch (e) {}
   }
@@ -167,6 +171,43 @@ async function handleExpiredPayment(env, session) {
     total: details.total_amount,
     reason: 'Kedaluwarsa (Tidak dibayar)'
   })
+}
+
+// ─── Reserve stok QRIS: ambil fisik saat QR dibuat, lepas di batal/expired ───
+// Sukses tidak melepas (stok sudah jadi milik pembeli). Idempoten via flag di sesi.
+async function reserveStock(env, variantId, qty) {
+  const lock = 'pay_stock_' + variantId
+  if (!(await acquireLock(env, lock, 15))) return null
+  try {
+    const produk = await readJSON(env, 'Produk', [])
+    const idx = produk.findIndex(pr => String(pr.id) === String(variantId))
+    if (idx === -1) return null
+    const list = produk[idx].stok || []
+    if (list.length < qty) return null
+    const taken = list.slice(0, qty)
+    produk[idx].stok = list.slice(qty)
+    await writeJSON(env, 'Produk', produk)
+    return taken
+  } finally {
+    await releaseLock(env, lock)
+  }
+}
+async function releaseReservedStock(env, variantId, items) {
+  if (!items || items.length === 0) return
+  const lock = 'pay_stock_' + variantId
+  if (!(await acquireLock(env, lock, 15))) { console.warn('[reserve] release lock gagal: ' + variantId); return }
+  try {
+    const produk = await readJSON(env, 'Produk', [])
+    const idx = produk.findIndex(pr => String(pr.id) === String(variantId))
+    if (idx === -1) {
+      console.warn('[reserve] varian hilang saat release, stok reserve hangus: ' + variantId)
+      return
+    }
+    produk[idx].stok = items.concat(produk[idx].stok || [])
+    await writeJSON(env, 'Produk', produk)
+  } finally {
+    await releaseLock(env, lock)
+  }
 }
 
 async function processPaymentSuccess(env, session, matchData) {
@@ -207,6 +248,10 @@ async function processPaymentSuccess(env, session, matchData) {
   if (details.type === 'purchase' && details.flashSaleExpiresAt) {
     const nowMs = Date.now()
     if (nowMs > Number(details.flashSaleExpiresAt)) {
+      // Stok reserve kembali ke etalase (refund uang di bawah)
+      if (details.reserved && Array.isArray(details.reserved) && details.reserved.length > 0) {
+        try { await releaseReservedStock(env, details.id, details.reserved) } catch (e) {}
+      }
       const { addSaldo } = await import('./user.js')
       const refundAmt = Number(details.total_amount) || 0
       const newBal = await addSaldo(env, details.userId, refundAmt)
@@ -238,6 +283,8 @@ async function processPaymentSuccess(env, session, matchData) {
       return
     }
   }
+
+  // SUKSES QRIS: stok sudah di-reserve saat QR dibuat → alur bawah pakai reserve (bukan ambil ulang)
 
   // Lock stok produk (samakan jalur saldo): cegah 2 buyer QRIS oversell snapshot basi
   const stockLock = 'pay_stock_' + details.id
@@ -301,9 +348,17 @@ async function processPaymentSuccess(env, session, matchData) {
     await releaseStock()
     return
   }
-  const ambilStok = stokList.slice(0, jumlahPesanan)
-  produk[produkIdx].stok = stokList.slice(jumlahPesanan)
-  await writeJSON(env, 'Produk', produk)
+  const ambilStok = (details.reserved && details.reserved.length >= jumlahPesanan)
+    ? details.reserved.slice(0, jumlahPesanan) // reserve saat QR dibuat — bukan ambil ulang
+    : stokList.slice(0, jumlahPesanan)
+  // Stok fisik sudah berkurang saat reserve; kurangi hanya bila sesi lama tanpa reserve
+  if (!(details.reserved && details.reserved.length >= jumlahPesanan)) {
+    produk[produkIdx].stok = stokList.slice(jumlahPesanan)
+    await writeJSON(env, 'Produk', produk)
+  } else {
+    const sisaR = details.reserved.slice(jumlahPesanan)
+    if (sisaR.length > 0) { try { await releaseReservedStock(env, details.id, sisaR) } catch (e) {} }
+  }
   await releaseStock()
   // OrderCounter: lindungi increment dengan lock
   if (await acquireLock(env, 'order_counter', 10)) {
@@ -368,4 +423,4 @@ async function processPaymentSuccess(env, session, matchData) {
   await clearOwnerOrderState(env, session)
 }
 
-export { checkPendingPayments, processPaymentSuccess, handleExpiredPayment }
+export { checkPendingPayments, processPaymentSuccess, handleExpiredPayment, reserveStock, releaseReservedStock }

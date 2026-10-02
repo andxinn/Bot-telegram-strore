@@ -775,11 +775,21 @@ async function handleCallbackQuery(env, cq) {
         }
         const merchantFeeSw = calcFee(gwQ, tot2)
         const chargeAmtSw = tot2 + merchantFeeSw
+        // RESERVE stok sebelum create invoice (oversell fix) — release bila create gagal
+        const { reserveStock: reserveSw } = await import('./payments.js')
+        const reservedSw = await reserveSw(env, pqProductId, jml2)
+        if (!reservedSw) {
+          await releaseLock(env, qrisLock)
+          await tgSendMessage(env, chatId, '❌ Stok habis (sudah dipesan pembeli lain).', getMainMenuKeyboard())
+          return
+        }
         const createdSw = await saweriaCreate(gwQ, trxId2, chargeAmtSw, {
           customerName: fromName || 'Customer',
           email: (fromUsername ? fromUsername : ('u' + fromId)) + '@bot.local'
         })
         if (!createdSw.ok) {
+          const { releaseReservedStock: relSw } = await import('./payments.js')
+          try { await relSw(env, pqProductId, reservedSw) } catch (e) {}
           await releaseLock(env, qrisLock)
           await tgSendMessage(env, chatId, '❌ Gagal membuat transaksi Saweria: ' + (createdSw.error || 'coba lagi'), getMainMenuKeyboard())
           return
@@ -822,6 +832,7 @@ async function handleCallbackQuery(env, cq) {
           extra: {
             id: Number(pqProductId), cart: jml2, produk: os2.produk, produk_nama: os2.varian,
             saweria_id: createdSw.id,
+            reserved: reservedSw,
             flashSaleId: os2.flashSaleId || null,
             flashSaleExpiresAt: os2.flashSaleExpiresAt || null,
             originalPrice: os2.originalPrice || null
@@ -840,6 +851,14 @@ async function handleCallbackQuery(env, cq) {
         }
       const merchantFeeDk = calcFee(gwQ, tot2)
       const chargeAmtDk = tot2 + merchantFeeDk
+      // RESERVE stok sebelum create invoice (oversell fix)
+      const { reserveStock: reserveDk } = await import('./payments.js')
+      const reservedDk = await reserveDk(env, pqProductId, jml2)
+      if (!reservedDk) {
+        await releaseLock(env, qrisLock)
+        await tgSendMessage(env, chatId, '❌ Stok habis (sudah dipesan pembeli lain).', getMainMenuKeyboard())
+        return
+      }
       const createdDk = await duitkuCreateQris(gwQ, trxId2, chargeAmtDk, {
           productDetails: os2.varian || os2.produk || 'Order',
           customerName: fromName || 'Customer',
@@ -849,6 +868,8 @@ async function handleCallbackQuery(env, cq) {
         // Duitku mengembalikan expiry yang dipakai (sudah di-clamp per provider)
         const dkExpMin = Number(createdDk && createdDk.expiry) > 0 ? Number(createdDk.expiry) : Number(gwQ.expiryPeriod || 5)
         if (!createdDk.ok) {
+          const { releaseReservedStock: relDk } = await import('./payments.js')
+          try { await relDk(env, pqProductId, reservedDk) } catch (e) {}
           await releaseLock(env, qrisLock)
           await tgSendMessage(env, chatId, '❌ Gagal membuat transaksi Duitku: ' + (createdDk.error || 'coba lagi'), getMainMenuKeyboard())
           return
@@ -902,6 +923,7 @@ async function handleCallbackQuery(env, cq) {
             duitku_reference: createdDk.reference, duitku_qr: createdDk.qrString,
             duitku_paymentUrl: createdDk.paymentUrl,
             duitku_gw: { merchantCode: gwQ.merchantCode, apiKey: gwQ.apiKey, mode: gwQ.mode, qrisProvider: gwQ.qrisProvider },
+            reserved: reservedDk,
             expiryMinutes: dkExpMin,
             display_total: chargeAmtDk,
             // v9update18: flash sale metadata (utk auto-cancel di processPaymentSuccess)
@@ -922,8 +944,18 @@ async function handleCallbackQuery(env, cq) {
       }
       const merchantFee = calcFee(gwQ, tot2)
       const chargeAmt = tot2 + merchantFee
+      // RESERVE stok sebelum create invoice (oversell fix)
+      const { reserveStock: reservePk } = await import('./payments.js')
+      const reservedPk = await reservePk(env, pqProductId, jml2)
+      if (!reservedPk) {
+        await releaseLock(env, qrisLock)
+        await tgSendMessage(env, chatId, '❌ Stok habis (sudah dipesan pembeli lain).', getMainMenuKeyboard())
+        return
+      }
       const createdQ = await pakasirCreate(gwQ, trxId2, chargeAmt)
       if (!createdQ.ok) {
+        const { releaseReservedStock: relPk } = await import('./payments.js')
+        try { await relPk(env, pqProductId, reservedPk) } catch (e) {}
         await releaseLock(env, qrisLock)
         await tgSendMessage(env, chatId, '❌ Gagal membuat transaksi Pakasir: ' + (createdQ.error || 'coba lagi'), getMainMenuKeyboard())
         return
@@ -988,6 +1020,7 @@ async function handleCallbackQuery(env, cq) {
           nama: fromName, username: fromUsername,
           provider: 'pakasir', pakasir_amount: displayTotal, pakasir_method: gwQ.method,
           pakasir_gw: { slug: gwQ.slug, method: gwQ.method, mode: gwQ.mode },
+          reserved: reservedPk,
           display_total: displayTotal,
           // v9update18: flash sale metadata (utk auto-cancel di processPaymentSuccess)
           flashSaleId: os2.flashSaleId || null,
@@ -1010,6 +1043,10 @@ async function handleCallbackQuery(env, cq) {
       const d = qCancelSes.depositDetails
       // Hanya pemilik sesi yang boleh membatalkan
       if (String(d.userId) !== String(fromId)) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Ini bukan sesi Anda.', true); return }
+      // QRIS purchase: kembalikan stok reserve ke etalase
+      if (d.type === 'purchase' && d.reserved && Array.isArray(d.reserved) && d.reserved.length > 0) {
+        try { const { releaseReservedStock } = await import('./payments.js'); await releaseReservedStock(env, d.id, d.reserved) } catch (e) {}
+      }
       if (d.provider === 'pakasir' && d.pakasir_gw) {
         try { await pakasirCancel(d.pakasir_gw, qTrxId, d.pakasir_amount) } catch (e) {}
       }

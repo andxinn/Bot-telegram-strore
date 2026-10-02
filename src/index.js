@@ -4,6 +4,7 @@ import { tgSendMessage, tgSetMyCommands } from './telegram.js'
 import { handleMessage } from './messages.js'
 import { handleCallbackQuery } from './callbacks.js'
 import { checkPendingPayments, processPaymentSuccess } from './payments.js'
+import { flushStokBaruNotif } from './admin.js'
 import { autoBackup, cleanupClosedTickets } from './backup.js'
 import { readJSON, writeJSON } from './kv.js'
 import { pakasirDetail, getPayCfg, amountsMatch } from './pakasir.js'
@@ -236,6 +237,7 @@ export default {
     await initConfig(env)
     if (event.cron === '* * * * *') {
       ctx.waitUntil(checkPendingPayments(env))
+      ctx.waitUntil(flushStokBaruNotif(env).catch(e => console.error('[cron stoknotif]', e.message)))
     } else if (event.cron === '0 * * * *') {
       const wibHour = (new Date().getUTCHours() + 7) % 24
       const wantHour = Number((await readJSON(env, 'BotConfig', {}).catch(() => ({}))).JamBackup ?? JamBackup ?? env.JAM_BACKUP ?? 6)

@@ -1,7 +1,7 @@
 import { readJSON, writeJSON, deleteKey } from './kv.js'
 import { tgSendMessage, tgSendPhotoBase64, tgEditMessageText as tgEditMessageTextRaw, tgAnswerCallbackQuery, tgSendDocument, tgGetFile, tgDownloadFile, tgDeleteMessage, tgCloseForumTopic, tgEditForumTopic } from './telegram.js'
 import { escapeMarkdown, ParseIdr, formatWIB, getDate, generateOrderId, sleep, getTanggalJam, mdSafe } from './helpers.js'
-import { isOwner, getRole } from './user.js'
+import { isOwner, getRole, acquireLock, releaseLock } from './user.js'
 import { getPayCfg, savePayCfg, pakasirConfigured, PAYMENT_METHODS, methodLabel, feeLabel, pakasirCreate, pakasirCancel, defaultPayCfg } from './pakasir.js'
 import { duitkuConfigured, duitkuTest, DUITKU_QRIS_PROVIDERS, providerLabel } from './duitku.js'
 
@@ -463,8 +463,8 @@ export async function recordStokBaru(env, variantId, count) {
     const productName = kat ? kat.produkName : (p.nameproduct || '-')
     const list = await readJSON(env, 'StokBaru', [])
     const existing = list.find(e => String(e.id) === String(variantId))
-    if (existing) { existing.count += count }
-    else { list.push({ id: variantId, variant: p.nameproduct || '-', product: productName, count }) }
+    if (existing) { existing.count += count; existing.notifyPending = true }
+    else { list.push({ id: variantId, variant: p.nameproduct || '-', product: productName, count, notifyPending: true }) }
     await writeJSON(env, 'StokBaru', list)
   } catch (e) {}
 }
@@ -513,6 +513,60 @@ async function countSisaStok(env, variantId) {
     const p = produk.find(pr => String(pr.id) === String(variantId))
     return p && p.stok ? p.stok.length : 0
   } catch (e) { return 0 }
+}
+
+// ─── Notif stok otomatis: cron tiap menit kirim pending ke semua user paralel ───
+// Batch 25 paralel (batas gratis Telegram ~30/dtk), retry 1x yang 429.
+export async function flushStokBaruNotif(env) {
+  const gotLock = await acquireLock(env, 'cron_stoknotif', 55)
+  if (!gotLock) return { ok: false, reason: 'locked' }
+  try {
+    const cfg = await readJSON(env, 'BotConfig', {})
+    if (cfg.stokAutoNotif === false) return { ok: false, reason: 'disabled' }
+    const list = await readJSON(env, 'StokBaru', [])
+    const pending = (list || []).filter(e => e.notifyPending)
+    if (pending.length === 0) return { ok: true, sent: 0 }
+    const msg = await buildStokBaruBroadcast(env)
+    if (!msg) return { ok: false, reason: 'empty' }
+    const banned = await readJSON(env, 'BannedUser', [])
+    const banSet = new Set((banned || []).map(b => String(b.sender)))
+    const { getUserList } = await import('./user.js')
+    const users = await getUserList(env)
+    const targets = (users || []).map(u => u.chatId).filter(id => Number(id) > 0 && !banSet.has(String(id)))
+    const { tgSendMessage: sendMsg, tgSendPhotoBase64: sendPhoto } = await import('./telegram.js')
+    const bcImg = cfg.stokBcImg || null
+    const sendOne = async (uid) => {
+      try {
+        if (bcImg) { await sendPhoto(env, uid, bcImg, msg, null, 'Markdown'); return true }
+        const r = await sendMsg(env, uid, msg, null, 'Markdown')
+        if (r && r.ok === false) throw new Error(r.description || 'tg error')
+        return true
+      } catch (e) {
+        if (String(e && e.message || '').includes('429')) {
+          await new Promise(r => setTimeout(r, 1500))
+          try {
+            if (bcImg) { await sendPhoto(env, uid, bcImg, msg, null, 'Markdown'); return true }
+            const r2 = await sendMsg(env, uid, msg, null, 'Markdown')
+            if (r2 && r2.ok === false) throw new Error(r2.description || 'tg error')
+            return true
+          } catch (e2) { return false }
+        }
+        return false
+      }
+    }
+    let sent = 0
+    for (let i = 0; i < targets.length; i += 25) {
+      const batch = targets.slice(i, i + 25)
+      const results = await Promise.allSettled(batch.map(sendOne))
+      sent += results.filter(r => r.status === 'fulfilled' && r.value).length
+    }
+    const rest = (list || []).map(e => (e.notifyPending ? { ...e, notifyPending: false } : e))
+    await writeJSON(env, 'StokBaru', rest)
+    console.log('[cron] StokBaru auto-notif: ' + sent + '/' + targets.length)
+    return { ok: true, sent, total: targets.length }
+  } finally {
+    await releaseLock(env, 'cron_stoknotif')
+  }
 }
 
 export async function handleAdminState(env, msg, state) {
@@ -2825,6 +2879,14 @@ export async function handleAdminCallback(env, cq) {
     data = 'adm_setfolder_fitur'
   }
 
+  if (data === 'adm_toggle_stoknotif') {
+    const cfg = await readJSON(env, 'BotConfig', {})
+    cfg.stokAutoNotif = (cfg.stokAutoNotif !== false) ? false : true
+    await writeJSON(env, 'BotConfig', cfg)
+    await tgAnswerCallbackQuery(env, cqId, cfg.stokAutoNotif ? '🔔 Notif stok otomatis AKTIF' : '🔕 Notif stok otomatis NONAKTIF')
+    data = 'adm_setfolder_fitur'
+  }
+
   if (data === 'adm_set_lb_banner') {
     const cfg = await readJSON(env, 'BotConfig', {})
     const lbHasBanner = !!(cfg.leaderboardBanner && cfg.leaderboardBanner.length > 50)
@@ -3281,12 +3343,14 @@ export async function handleAdminCallback(env, cq) {
     const cfg = await readJSON(env, 'BotConfig', {})
     const lbEnabled = cfg.leaderboardEnabled !== false
     const lbHasBanner = !!(cfg.leaderboardBanner && cfg.leaderboardBanner.length > 50)
+    const stokNotif = cfg.stokAutoNotif !== false
     await tgEditMessageText(env, chatId, messageId,
       '*🏆 FITUR TAMBAHAN*\nPengaturan fitur-fitur opsional bot:',
       {
         inline_keyboard: [
           [{ text: '🏆 Leaderboard: ' + (lbEnabled ? '✅ Aktif' : '❌ Nonaktif'), callback_data: 'adm_toggle_leaderboard' }],
           [{ text: '🖼️ Banner Leaderboard (' + (lbHasBanner ? 'Sudah Ada' : 'Belum Ada') + ')', callback_data: 'adm_set_lb_banner' }],
+          [{ text: '🔔 Notif Stok Otomatis: ' + (stokNotif ? '✅ Aktif' : '❌ Nonaktif'), callback_data: 'adm_toggle_stoknotif' }],
           [{ text: '🔙 Kembali ke Settings', callback_data: 'adm_settings' }]
         ]
       }, 'Markdown'

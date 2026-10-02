@@ -415,7 +415,7 @@ async function handleCallbackQuery(env, cq) {
     if (produk.length === 0) { await editCard(env, cq, 'Maaf, tidak ada produk tersedia.', null); return }
     await tgAnswerCallbackQuery(env, cq.id, '🔄 Stok diperbarui', false)
     let text = '╭───〔 ☰ INFO STOK 〕───\n'
-    text += '┊ ⌚ ' + getTanggalJam().tanggal + ' ' + getTanggalJam().jam + ' WIB\n'
+    text += '┊ 🕒 ' + getTanggalJam().tanggal + ' ' + getTanggalJam().jam + ' WIB\n'
     text += '├──────────────────\n'
     let skipped = 0
     for (const v of produk) {

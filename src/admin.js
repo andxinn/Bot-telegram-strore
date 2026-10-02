@@ -484,7 +484,7 @@ async function buildStokBaruBroadcast(env) {
   const h = wib.getUTCHours()
   const salam = (h >= 5 && h <= 10) ? '🌅 Selamat Pagi' : (h >= 11 && h <= 14) ? '☀️ Selamat Siang' : (h >= 15 && h <= 18) ? '🌇 Selamat Sore' : '🌙 Selamat Malam'
   const bln = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][wib.getUTCMonth()]
-  const tgl = wib.getUTCDate() + ' ' + bln + ' ' + wib.getUTCFullYear() + ' · ' + String(h).padStart(2, '0') + '.' + String(wib.getUTCMinutes()).padStart(2, '0') + ' WIB'
+  const tgl = wib.getUTCDate() + ' ' + bln + ' ' + wib.getUTCFullYear()
   let msg = '╭───〔 🆕 *STOK TERBARU* 〕───\n'
   msg += '┊ ' + salam + ', kak! 👋\n'
   msg += '┊ Kabar baik, stok favoritmu\n'
@@ -515,55 +515,102 @@ async function countSisaStok(env, variantId) {
   } catch (e) { return 0 }
 }
 
-// ─── Notif stok otomatis: cron tiap menit kirim pending ke semua user paralel ───
-// Batch 25 paralel (batas gratis Telegram ~30/dtk), retry 1x yang 429.
+// ─── Notif stok otomatis (cron tiap menit) ───
+// Chunked + resumable: state disimpan di StokNotifState (cursor idx) supaya
+// ribuan user pun pasti terkirim semua walau satu tick cron dibatasi waktunya.
+// Flag notifyPending di StokBaru HANYA di-reset setelah broadcast benar-benar
+// selesai → cegah kirim ganda bila tick terpotong di tengah.
+// ponytail: user yang sudah blokir bot (403) di-skip, tidak bisa dipaksa kirim.
+const STOK_NOTIF_CHUNK = 500
+
+async function stokSendOne(env, sendMsg, sendPhoto, bcImg, uid, msg) {
+  if (bcImg) return await sendPhoto(env, uid, bcImg, msg, null, 'Markdown')
+  return await sendMsg(env, uid, msg, null, 'Markdown')
+}
+
 export async function flushStokBaruNotif(env) {
   const gotLock = await acquireLock(env, 'cron_stoknotif', 55)
   if (!gotLock) return { ok: false, reason: 'locked' }
   try {
     const cfg = await readJSON(env, 'BotConfig', {})
     if (cfg.stokAutoNotif === false) return { ok: false, reason: 'disabled' }
+
+    let st = await readJSON(env, 'StokNotifState', null)
     const list = await readJSON(env, 'StokBaru', [])
-    const pending = (list || []).filter(e => e.notifyPending)
-    if (pending.length === 0) return { ok: true, sent: 0 }
-    const msg = await buildStokBaruBroadcast(env)
-    if (!msg) return { ok: false, reason: 'empty' }
-    const banned = await readJSON(env, 'BannedUser', [])
-    const banSet = new Set((banned || []).map(b => String(b.sender)))
-    const { getUserList } = await import('./user.js')
-    const users = await getUserList(env)
-    const targets = (users || []).map(u => u.chatId).filter(id => Number(id) > 0 && !banSet.has(String(id)))
+
+    if (!st) {
+      const pending = (list || []).filter(e => e.notifyPending)
+      if (pending.length === 0) return { ok: true, sent: 0 }
+      const msg = await buildStokBaruBroadcast(env)
+      if (!msg) return { ok: false, reason: 'empty' }
+      const banned = await readJSON(env, 'BannedUser', [])
+      const banSet = new Set((banned || []).map(b => String(b.sender)))
+      const { getUserList } = await import('./user.js')
+      const users = await getUserList(env)
+      const targets = (users || []).map(u => u.chatId).filter(id => Number(id) > 0 && !banSet.has(String(id)))
+      if (targets.length === 0) {
+        const rest0 = (list || []).map(e => (e.notifyPending ? { ...e, notifyPending: false } : e))
+        await writeJSON(env, 'StokBaru', rest0)
+        return { ok: true, sent: 0, total: 0 }
+      }
+      // Snapshot entri yang dikirim sekarang: admin tambah stok tengah jalan
+      // tidak ikut di-reset, dikirim di siklus berikutnya.
+      st = { msg, targets, idx: 0, sent: 0, retry429: [], snapshot: pending.map(e => ({ id: e.id })) }
+    }
+
     const { tgSendMessage: sendMsg, tgSendPhotoBase64: sendPhoto } = await import('./telegram.js')
     const bcImg = cfg.stokBcImg || null
-    const sendOne = async (uid) => {
-      try {
-        if (bcImg) { await sendPhoto(env, uid, bcImg, msg, null, 'Markdown'); return true }
-        const r = await sendMsg(env, uid, msg, null, 'Markdown')
-        if (r && r.ok === false) throw new Error(r.description || 'tg error')
-        return true
-      } catch (e) {
-        if (String(e && e.message || '').includes('429')) {
-          await new Promise(r => setTimeout(r, 1500))
-          try {
-            if (bcImg) { await sendPhoto(env, uid, bcImg, msg, null, 'Markdown'); return true }
-            const r2 = await sendMsg(env, uid, msg, null, 'Markdown')
-            if (r2 && r2.ok === false) throw new Error(r2.description || 'tg error')
-            return true
-          } catch (e2) { return false }
-        }
-        return false
+    // Tick ini: kirim chunk dari idx, ditambah retry user 429 dari tick sebelumnya
+    const freshStart = st.idx
+    const freshEnd = Math.min(st.idx + STOK_NOTIF_CHUNK, st.targets.length)
+    const todo = st.retry429.concat(st.targets.slice(freshStart, freshEnd))
+    let chunkOk = 0, chunkFail = [], cooldown = 0
+
+    for (let i = 0; i < todo.length; i += 25) {
+      const batch = todo.slice(i, Math.min(i + 25, todo.length))
+      const results = await Promise.allSettled(batch.map(async (uid) => {
+        try {
+          const r = await stokSendOne(env, sendMsg, sendPhoto, bcImg, uid, st.msg)
+          if (r && r.ok === false) {
+            if (r.error_code === 429 && r.parameters && r.parameters.retry_after) {
+              cooldown = Math.max(cooldown, Number(r.parameters.retry_after) || 1)
+            }
+            throw new Error(r.description || ('tg ' + r.error_code))
+          }
+          return true
+        } catch (e) { throw e }
+      }))
+      for (let j = 0; j < results.length; j++) {
+        if (results[j].status === 'fulfilled') chunkOk++
+        else chunkFail.push({ uid: batch[j], reason: String(results[j].reason && results[j].reason.message || 'err') })
+      }
+      if (cooldown > 0) {
+        await new Promise(r => setTimeout(r, Math.min(cooldown, 30) * 1000))
+        cooldown = 0
       }
     }
-    let sent = 0
-    for (let i = 0; i < targets.length; i += 25) {
-      const batch = targets.slice(i, i + 25)
-      const results = await Promise.allSettled(batch.map(sendOne))
-      sent += results.filter(r => r.status === 'fulfilled' && r.value).length
+
+    const failed429 = chunkFail.filter(f => /^429/.test(f.reason)).map(f => f.uid)
+    const hardFail = chunkFail.filter(f => !/^429/.test(f.reason)).length
+    st.idx = freshEnd
+    st.sent += chunkOk
+    st.retry429 = failed429
+
+    const done = st.idx >= st.targets.length && st.retry429.length === 0
+    if (done) {
+      // Hanya reset entri yang ada SAAT broadcast mulai. Entrri yang ditambah admin
+      // tengah jalan (snapshot baru) tetap pending → dikirim di siklus berikutnya.
+      const snapshot = st.snapshot || []
+      const seen = new Set(snapshot.map(e => String(e.id)))
+      const rest = (list || []).map(e => (seen.has(String(e.id)) ? { ...e, notifyPending: false } : e))
+      await writeJSON(env, 'StokBaru', rest)
+      await deleteKey(env, 'StokNotifState')
+      console.log('[cron] StokBaru auto-notif SELESAI: ' + st.sent + '/' + st.targets.length + (hardFail ? ' (' + hardFail + ' gagal)' : ''))
+      return { ok: true, sent: st.sent, total: st.targets.length, done: true }
     }
-    const rest = (list || []).map(e => (e.notifyPending ? { ...e, notifyPending: false } : e))
-    await writeJSON(env, 'StokBaru', rest)
-    console.log('[cron] StokBaru auto-notif: ' + sent + '/' + targets.length)
-    return { ok: true, sent, total: targets.length }
+    await writeJSON(env, 'StokNotifState', st)
+    console.log('[cron] StokBaru auto-notif chunk: ' + st.sent + '/' + st.targets.length + (st.retry429.length ? ' (retry ' + st.retry429.length + ' rate-limit)' : ''))
+    return { ok: true, sent: st.sent, total: st.targets.length, done: false }
   } finally {
     await releaseLock(env, 'cron_stoknotif')
   }

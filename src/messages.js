@@ -603,7 +603,7 @@ async function showStockInfo(env, chatId) {
     return
   }
   let cap = '╭───〔 ☰ INFO STOK 〕───\n'
-  cap += '┊ ⌚ ' + getTanggalJam().tanggal + ' ' + getTanggalJam().jam + ' WIB\n'
+  cap += '┊ 🕒 ' + getTanggalJam().tanggal + ' ' + getTanggalJam().jam + ' WIB\n'
   cap += '├──────────────────\n'
   let skippedStock = 0
   for (const v of withStock) {

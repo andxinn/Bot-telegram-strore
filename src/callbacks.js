@@ -714,9 +714,7 @@ async function handleCallbackQuery(env, cq) {
         await tgSendDocument(env, chatId, sucFileS, trxId + '.txt', sucCapS, getMainMenuKeyboard())
       }
       if (InvoiceLogger) {
-        await tgSendMessage(env, InvoiceLogger,
-          '💳 *BAYAR SALDO*\nUser: @' + fromUsername + ' (' + fromId + ')\nID: `' + trxId + '`\nProduk: ' + os.varian + ' x' + jml + '\nTotal: Rp ' + tot.toLocaleString('id-ID'),
-          null, 'Markdown')
+        // Dihapus: duplikat. Notif sukses tunggal via sendTxLog di bawah.
       }
       const { sendTxLog } = await import('./messages.js')
       await sendTxLog(env, {
@@ -725,6 +723,9 @@ async function handleCallbackQuery(env, cq) {
         produk: os.produk,
         varian: os.varian,
         total: tot,
+        qty: jml,
+        provider: 'saldo',
+        role: (isOwner(fromId) ? 'Owner' : ((await getRole(env, fromId)) ? 'Admin' : 'User')),
         fileTxtContent: sucFileS,
         fileName: trxId + '.txt'
       })

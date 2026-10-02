@@ -413,18 +413,20 @@ async function processPaymentSuccess(env, session, matchData) {
     await tgSendDocument(env, details.userId, fileContent, session.id + '.txt', suc, getMainMenuKeyboard())
   }
   if (InvoiceLogger) {
-    const tj = getTanggalJam()
-    let logPesan = '*PRODUK DIBELI \u2705*\n\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e  \n\u2502 *Nama:* ' + details.nama + '\n\u2502 *Produk:* ' + details.produk + '\n\u2502 *Variasi:* ' + details.produk_nama + '\n\u2502 *Jumlah:* x' + jumlahPesanan + '\n\u2502 *Total:* ' + ParseIdr(details.total_amount) + '\n\u2502 *Tanggal:* ' + tj.tanggal + ' ' + tj.jam + '\n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f  \n\nID Transaksi:\n`' + session.id + '`'
-    const logKeyboard = { inline_keyboard: [[{ text: 'Chat User \ud83d\udce9', url: 'tg://user?id=' + details.userId }]] }
-    await tgSendMessage(env, InvoiceLogger, escapeMarkdown(logPesan), logKeyboard)
+    // Dihapus: duplikat. Notif sukses tunggal dikirim via sendTxLog di bawah
+    // (target = BotConfig.ChannelLog dgn dukungan thread topik grup).
   }
   const { sendTxLog } = await import('./messages.js')
+  const { isOwner, getRole } = await import('./user.js')
   await sendTxLog(env, {
     type: 'success',
     user: { username: details.nama, id: details.userId },
     produk: details.produk,
     varian: details.produk_nama,
     total: details.total_amount,
+    qty: jumlahPesanan,
+    provider: details.provider || 'qris',
+    role: (isOwner(details.userId) ? 'Owner' : ((await getRole(env, details.userId)) ? 'Admin' : 'User')),
     fileTxtContent: fileContent,
     fileName: session.id + '.txt'
   })

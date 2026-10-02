@@ -20,11 +20,12 @@ async function editCard(env, cq, caption, keyboard, parseMode = 'Markdown') {
       : await tgEditMessageText(env, chatId, messageId, caption, keyboard, parseMode)
   } catch (e) { res = null }
   if (res && (res.ok || (res.description && res.description.indexOf('not modified') !== -1))) return res
-  // Fallback tanpa Markdown agar transisi kartu tidak pernah macet karena parse-error
+  // Fallback tanpa parse-mode: strip tag HTML agar tidak tampil literal
+  const plain = parseMode === 'HTML' ? String(caption).replace(/<[^>]*>/g, '') : caption
   try {
     return isPhoto
-      ? await tgEditMessageCaption(env, chatId, messageId, caption, keyboard, '')
-      : await tgEditMessageText(env, chatId, messageId, caption, keyboard, '')
+      ? await tgEditMessageCaption(env, chatId, messageId, plain, keyboard, '')
+      : await tgEditMessageText(env, chatId, messageId, plain, keyboard, '')
   } catch (e) { return res }
 }
 
@@ -193,7 +194,9 @@ async function handleCallbackQuery(env, cq) {
   }
 
   if (data.startsWith('tk_close_')) {
-    const tkId = data.replace('tk_close_', '')
+    // 'tk_close_yes_<id>' harus dicek DULU — replace generik memakan prefixnya
+    const isConfirm = data.startsWith('tk_close_yes_')
+    const tkId = isConfirm ? data.replace('tk_close_yes_', '') : data.replace('tk_close_', '')
     const tickets = await readJSON(env, 'Tickets', [])
     const idx = tickets.findIndex(ticket => ticket.ticketId === tkId)
     if (idx === -1) {
@@ -218,7 +221,7 @@ async function handleCallbackQuery(env, cq) {
         }, 'Markdown')
       return
     }
-    const realTkId = tkId.replace('tk_close_yes_', '')
+    const realTkId = tkId
     const idx2 = tickets.findIndex(ticket => ticket.ticketId === realTkId)
     await tgAnswerCallbackQuery(env, cqId, '🔒 Tiket bantuan berhasil ditutup', false)
     if (idx2 !== -1) {
@@ -253,6 +256,11 @@ async function handleCallbackQuery(env, cq) {
     const ft = tickets.find(ticket => ticket.ticketId === tkId)
     if (!ft) {
       await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket tidak ditemukan.', true)
+      return
+    }
+    // Tiket closed tidak bisa di-follow-up — buat tiket baru (samakan pesan konfirmasi close)
+    if (ft.status === 'closed') {
+      await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket sudah selesai — buat tiket baru bila masih perlu bantuan.', true)
       return
     }
     if (String(ft.userId) !== String(fromId) && !isOwner(fromId) && await getRole(env, fromId) !== 'admin') {
@@ -321,7 +329,7 @@ async function handleCallbackQuery(env, cq) {
     const fsMap = {}
     for (const vv of variants) {
       const f = fsAll[String(vv.id)]
-      if (f && f.expiresAt && nowFs < Number(f.expiresAt)) fsMap[String(vv.id)] = f
+      if (f && (!f.expiresAt || nowFs < Number(f.expiresAt))) fsMap[String(vv.id)] = f
     }
     const trxAll = await readJSON(env, 'Trx', [])
     const sold = trxAll.filter(t => t.status === 'Lunas' && String(t.produk) === String(kat.produkName)).reduce((a, t) => a + (Number(t.jumlah) || 0), 0)
@@ -409,11 +417,15 @@ async function handleCallbackQuery(env, cq) {
     let text = '╭───〔 📦 INFO STOK 〕\n'
     text += '┊ 🕒 ' + getDate('Asia/Jakarta') + ' WIB\n'
     text += '├──────────────────\n'
+    let skipped = 0
     for (const v of produk) {
       const cnt = (v.stok ? v.stok.length : 0)
       const mark = cnt > 0 ? '✅' : '❌'
-      text += '┊ ' + mark + ' *' + v.id + '* · ' + mdSafe(v.nameproduct) + ' ➜ ' + cnt + 'x\n'
+      const row = '┊ ' + mark + ' *' + v.id + '* · ' + mdSafe(v.nameproduct) + ' ➜ ' + cnt + 'x\n'
+      if ((text + row).length > 3600) { skipped++; continue }
+      text += row
     }
+    if (skipped > 0) text += '┊ … +' + skipped + ' varian lain\n'
     text += '╰──────────────────\n\n👉 Ketik nomor produk untuk membeli'
     const keyboard = { inline_keyboard: [[{ text: '↻ Refresh', callback_data: 'refreshh' }]] }
     await editCard(env, cq, text, keyboard)
@@ -456,7 +468,7 @@ async function handleCallbackQuery(env, cq) {
     const fsMap = {}
     for (const vv of variants) {
       const f = fsAll[String(vv.id)]
-      if (f && f.expiresAt && nowFs < Number(f.expiresAt)) fsMap[String(vv.id)] = f
+      if (f && (!f.expiresAt || nowFs < Number(f.expiresAt))) fsMap[String(vv.id)] = f
     }
     const trxAll = await readJSON(env, 'Trx', [])
     const sold = trxAll.filter(t => t.status === 'Lunas' && String(t.produk) === String(kat.produkName)).reduce((a, t) => a + (Number(t.jumlah) || 0), 0)
@@ -517,7 +529,8 @@ async function handleCallbackQuery(env, cq) {
     const p = produk.find(pr => String(pr.id) === String(productId))
     if (!p) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Produk tidak ditemukan.', true); return }
     const stockCount = p.stok ? p.stok.length : 0
-    if (orderState.jumlahPesanan > stockCount) orderState.jumlahPesanan = Math.max(1, stockCount)
+    if (stockCount === 0) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Stok produk "' + p.nameproduct + '" sedang KOSONG.\nSilakan pilih varian lain.', true); return }
+    if (orderState.jumlahPesanan > stockCount) orderState.jumlahPesanan = stockCount
     orderState.stock_count = stockCount
     orderState.totalPrice = (orderState.price || p.price) * orderState.jumlahPesanan  // v9update18: use locked price
     await writeJSON(env, 'orderState_' + fromId, orderState)
@@ -888,8 +901,7 @@ async function handleCallbackQuery(env, cq) {
             provider: 'duitku', duitku_amount: chargeAmtDk, duitku_provider: gwQ.qrisProvider,
             duitku_reference: createdDk.reference, duitku_qr: createdDk.qrString,
             duitku_paymentUrl: createdDk.paymentUrl,
-            // apiKey tidak disimpan di sesi — diambil dari config live (resolveGw di payments.js)
-            duitku_gw: { merchantCode: gwQ.merchantCode, mode: gwQ.mode, qrisProvider: gwQ.qrisProvider },
+            duitku_gw: { merchantCode: gwQ.merchantCode, apiKey: gwQ.apiKey, mode: gwQ.mode, qrisProvider: gwQ.qrisProvider },
             expiryMinutes: dkExpMin,
             display_total: chargeAmtDk,
             // v9update18: flash sale metadata (utk auto-cancel di processPaymentSuccess)
@@ -932,7 +944,8 @@ async function handleCallbackQuery(env, cq) {
       qMsg += '┊ *Total Bayar :* Rp' + displayTotal.toLocaleString('id-ID') + '\n'
       qMsg += '╰──────────────────\n\n'
       if (!isQrisQ) qMsg += '🏦 Nomor VA: `' + paymentNumber + '`\n(ketuk untuk menyalin)\n'
-      qMsg += '⏰ Kadaluarsa dalam *5 menit*\n'
+      const pkExpMin = Number(gwQ.expiryPeriod) > 0 ? Number(gwQ.expiryPeriod) : 5
+      qMsg += '⏰ Kadaluarsa dalam *' + pkExpMin + ' menit*\n'
       qMsg += isQrisQ ? '📲 Scan QR di bawah untuk membayar' : '💸 Bayar ke Virtual Account di atas'
       const pkRows = [[{ text: '↻ Cek Pembayaran', callback_data: 'cekbayar_' + trxId2, style: 'success' }]]
       if (gwQ.mode === 'sandbox') pkRows.push([{ text: '🧪 Simulasi Bayar', callback_data: 'simulbayar_' + trxId2, style: 'primary' }])
@@ -971,7 +984,7 @@ async function handleCallbackQuery(env, cq) {
         depositDetails: {
           userId: fromId, type: 'purchase', id: Number(pqProductId),
           cart: jml2, produk: os2.produk, produk_nama: os2.varian,
-          total_amount: displayTotal, expired: expiredTime(), key: qMsgKey,
+          total_amount: displayTotal, expired: expiredTime(pkExpMin), key: qMsgKey,
           nama: fromName, username: fromUsername,
           provider: 'pakasir', pakasir_amount: displayTotal, pakasir_method: gwQ.method,
           pakasir_gw: { slug: gwQ.slug, method: gwQ.method, mode: gwQ.mode },
@@ -1376,19 +1389,20 @@ async function handleCallbackQuery(env, cq) {
     return
   }
 
+  // 'add_stock_multi_' dicek DULU — prefix 'add_stock_' menelannya bila duluan
+  if (data.startsWith('add_stock_multi_')) {
+    const kodeM = data.replace('add_stock_multi_', '')
+    const stateM = { action: 'addstock_multi', step: 'data', kode: kodeM }
+    await writeJSON(env, 'manageState_' + fromId, stateM)
+    await tgEditMessageText(env, chatId, messageId, 'Kirim data stok (1 per baris, format: info|expired_days).\nKetik /selesai jika sudah.')
+    return
+  }
+
   if (data.startsWith('add_stock_')) {
     const kode = data.replace('add_stock_', '')
     const state = { action: 'addstock', step: 'data', kode }
     await writeJSON(env, 'manageState_' + fromId, state)
     await tgEditMessageText(env, chatId, messageId, 'Kirim data stok (1 per baris).\nKetik /selesai jika sudah.')
-    return
-  }
-
-  if (data.startsWith('add_stock_multi_')) {
-    const kode = data.replace('add_stock_multi_', '')
-    const state = { action: 'addstock_multi', step: 'data', kode }
-    await writeJSON(env, 'manageState_' + fromId, state)
-    await tgEditMessageText(env, chatId, messageId, 'Kirim data stok (1 per baris, format: info|expired_days).\nKetik /selesai jika sudah.')
     return
   }
 

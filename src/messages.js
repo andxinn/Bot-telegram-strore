@@ -260,7 +260,7 @@ async function handleMessage(env, msg) {
   }
 
   if (text === 'Deposit' || text === '\ud83d\udcb3 Deposit') {
-    const sent = await tgSendMessage(env, chatId, escapeMarkdown('💳 *Deposit Saldo*\n\nMasukkan jumlah deposit (angka):'))
+    const sent = await tgSendMessage(env, chatId, escapeMarkdown('💳 *Deposit Saldo*\n\nMasukkan jumlah deposit (angka):\nMin Rp1.000 – Maks Rp500.000'))
     const promptMid = sent?.result?.message_id
     await writeJSON(env, 'depositState_' + fromId, { step: 'amount', promptMid })
     return
@@ -747,9 +747,9 @@ async function handleDepositState(env, msg, state) {
   }
   if (state.step === 'amount') {
     const amount = parseInt(text.replace(/[^0-9]/g, ''))
-    if (isNaN(amount) || amount < 5000) {
+    if (isNaN(amount) || amount < 1000 || amount > 500000) {
       if (state.promptMid) { try { await tgDeleteMessage(env, chatId, state.promptMid) } catch (e) {} }
-      const warningSent = await tgSendMessage(env, chatId, 'Minimal deposit Rp5.000. Masukkan angka:')
+      const warningSent = await tgSendMessage(env, chatId, '⚠️ Deposit Min Rp1.000 – Maks Rp500.000. Masukkan angka:')
       state.promptMid = warningSent?.result?.message_id
       await writeJSON(env, 'depositState_' + fromId, state)
       return

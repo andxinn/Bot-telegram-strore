@@ -212,9 +212,19 @@ async function tgEditForumTopic(env, chatId, messageThreadId, name) {
   return await res.json()
 }
 
+async function tgSetReaction(env, chatId, messageId, emoji = '🔥', isBig = true) {
+  try {
+    const res = await fetch(TG_API(env.BOT_TOKEN) + '/setMessageReaction', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, message_id: messageId, reaction: [{ type: 'emoji', emoji }], is_big: isBig })
+    })
+    return await res.json()
+  } catch (e) { return null }
+}
+
 export {
   tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgGetFile, tgDownloadFile, tgEditMessageText,
   tgEditMessageMedia, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendDocumentFile,
-  tgGetChat, tgSendChatAction, tgSetMyCommands, tgSendSticker,
+  tgGetChat, tgSendChatAction, tgSetMyCommands, tgSendSticker, tgSetReaction,
   tgCreateForumTopic, tgCloseForumTopic, tgReopenForumTopic, tgDeleteForumTopic, tgEditForumTopic
 }

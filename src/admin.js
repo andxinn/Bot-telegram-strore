@@ -469,25 +469,6 @@ export async function recordStokBaru(env, variantId, count) {
   } catch (e) {}
 }
 
-function getSalamWIB() {
-  const wibHour = new Date(Date.now() + 7 * 3600 * 1000).getUTCHours()
-  if (wibHour >= 5 && wibHour <= 10) return '🌅 Selamat Pagi'
-  if (wibHour >= 11 && wibHour <= 14) return '☀️ Selamat Siang'
-  if (wibHour >= 15 && wibHour <= 18) return '🌇 Selamat Sore'
-  return '🌙 Selamat Malam'
-}
-
-function getWaktuUpdateWIB() {
-  const d = new Date(Date.now() + 7 * 3600 * 1000)
-  const bulan = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
-  const tgl = d.getUTCDate()
-  const bln = bulan[d.getUTCMonth()]
-  const thn = d.getUTCFullYear()
-  const jam = String(d.getUTCHours()).padStart(2, '0')
-  const menit = String(d.getUTCMinutes()).padStart(2, '0')
-  return tgl + ' ' + bln + ' ' + thn + ', ' + jam + '.' + menit + ' WIB'
-}
-
 async function buildStokBaruBroadcast(env) {
   const list = await readJSON(env, 'StokBaru', [])
   if (!list || list.length === 0) return null
@@ -498,29 +479,38 @@ async function buildStokBaruBroadcast(env) {
     if (!groups[key]) { groups[key] = []; order.push(key) }
     groups[key].push(e)
   }
-  let msg = '🆕 𝗦𝗧𝗢𝗞 𝗧𝗘𝗥𝗕𝗔𝗥𝗨\n'
-  msg += getSalamWIB() + ', kak! 👋\n'
-  msg += '🕒 Update: ' + getWaktuUpdateWIB() + '\n\n'
-  msg += 'Produk yang baru direstock:\n\n'
-  let n = 1
+  const pad = (s, n) => String(s).padEnd(n, ' ')
+  const wib = new Date(Date.now() + 7 * 3600 * 1000)
+  const h = wib.getUTCHours()
+  const salam = (h >= 5 && h <= 10) ? '🌅 Selamat Pagi' : (h >= 11 && h <= 14) ? '☀️ Selamat Siang' : (h >= 15 && h <= 18) ? '🌇 Selamat Sore' : '🌙 Selamat Malam'
+  const bln = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'][wib.getUTCMonth()]
+  const tgl = wib.getUTCDate() + ' ' + bln + ' ' + wib.getUTCFullYear() + ' · ' + String(h).padStart(2, '0') + '.' + String(wib.getUTCMinutes()).padStart(2, '0') + ' WIB'
+  let msg = '╭───〔 🆕 *STOK TERBARU* 〕───\n'
+  msg += '┊ ' + salam + ', kak! 👋\n'
+  msg += '┊ Kabar baik, stok favoritmu restock 🛍️\n'
+  msg += '┊ ──────────────────\n'
   for (const prod of order) {
-    msg += n + '. 📦 ' + prod + '\n'
-    const vars = groups[prod]
-    vars.forEach((v, i) => {
-      let conn = '└'
-      if (vars.length > 1) {
-        if (i === 0) conn = '┬'
-        else if (i === vars.length - 1) conn = '└'
-        else conn = '├'
-      }
-      msg += '   ' + conn + ' ' + v.variant + ' +' + v.count + ' stok\n'
-    })
-    msg += '\n'
-    n++
+    msg += '┊ 📦 ' + mdSafe(String(prod).toUpperCase()) + '\n'
+    for (const v of groups[prod]) {
+      const total = await countSisaStok(env, v.id)
+      msg += '┊ `' + pad('Varian', 6) + ' : ' + mdSafe(v.variant) + '`\n'
+      msg += '┊ `' + pad('Masuk', 6) + ' : +' + v.count + ' stok`\n'
+      msg += '┊ `' + pad('Sisa', 6) + ' : ' + total + ' stok`\n'
+    }
+    msg += '┊ ──────────────────\n'
   }
-  msg += '┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n'
-  msg += '🛍️ Buruan diorder ya kak!'
+  msg += '┊ 📅 ' + tgl + '\n'
+  msg += '┊ 🙏 Buruan diorder ya kak, stok terbatas!\n'
+  msg += '╰──────────────────'
   return msg
+}
+
+async function countSisaStok(env, variantId) {
+  try {
+    const produk = await readJSON(env, 'Produk', [])
+    const p = produk.find(pr => String(pr.id) === String(variantId))
+    return p && p.stok ? p.stok.length : 0
+  } catch (e) { return 0 }
 }
 
 export async function handleAdminState(env, msg, state) {
@@ -2409,7 +2399,7 @@ export async function handleAdminCallback(env, cq) {
       { inline_keyboard: [
         [{ text: '✅ Kirim ke Semua', callback_data: 'adm_bc_stokbaru_go' }],
         [{ text: '🔙 Batal', callback_data: 'adm_broadcast' }]
-      ] }, '')
+      ] }, 'Markdown')
     return
   }
 
@@ -2427,8 +2417,8 @@ export async function handleAdminCallback(env, cq) {
     let bcSent = 0
     for (const u of bcUsers) {
       try {
-        if (bcImg) { await tgSendPhotoBase64(env, u.chatId, bcImg, bcMsg, null, '') }
-        else { await tgSendMessage(env, u.chatId, bcMsg, null, '') }
+        if (bcImg) { await tgSendPhotoBase64(env, u.chatId, bcImg, bcMsg, null, 'Markdown') }
+        else { await tgSendMessage(env, u.chatId, bcMsg, null, 'Markdown') }
         bcSent++; await sleep(50)
       } catch (e) {}
     }

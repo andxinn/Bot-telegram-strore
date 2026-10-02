@@ -8,6 +8,7 @@ function qrisDinamis(qrisStatic, nominal) {
   while (i < qr.length) {
     const id = qr.slice(i, i + 2)
     const len = parseInt(qr.slice(i + 2, i + 4))
+    if (isNaN(len) || len <= 0) break
     const val = qr.slice(i + 4, i + 4 + len)
     if (id === '63') break
     beforeCRC += id + String(len).padStart(2, '0') + val

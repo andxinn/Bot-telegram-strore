@@ -303,7 +303,7 @@ async function handleMessage(env, msg) {
       const kategori = await readJSON(env, 'Kategori', [])
       const user = await getUser(env, chatId)
       const keyboard = getMainMenuKeyboard()
-      await tgSendMessage(env, chatId, 'Halo Kak *' + (user?.name || fromName) + '* \ud83d\ude0a\n\nPilih produk dengan menekan nomor berikut:', keyboard, 'Markdown')
+      await tgSendMessage(env, chatId, 'Halo Kak *' + mdSafe(user?.name || fromName) + '* \ud83d\ude0a\n\nPilih produk dengan menekan nomor berikut:', keyboard, 'Markdown')
     }
     return
   }
@@ -311,7 +311,7 @@ async function handleMessage(env, msg) {
   if (text === '🔙 Kembali ke Menu Utama') {
     const kmbUser = await getUser(env, chatId) || await addUser(env, chatId, fromName)
     const mainKb = getMainMenuKeyboard()
-    await tgSendMessage(env, chatId, 'Halo Kak *' + (kmbUser?.name || fromName) + '* 😊\n\nSilakan pilih menu:', mainKb, 'Markdown')
+    await tgSendMessage(env, chatId, 'Halo Kak *' + mdSafe(kmbUser?.name || fromName) + '* 😊\n\nSilakan pilih menu:', mainKb, 'Markdown')
     return
   }
 
@@ -587,7 +587,7 @@ async function showVariants(env, chatId, kategoriId, fromId) {
   const fsMap = {}
   for (const _v of variants) {
     const _fs = fsAll[String(_v.id)]
-    if (_fs && _fs.expiresAt && _nowFs < Number(_fs.expiresAt)) fsMap[String(_v.id)] = _fs
+    if (_fs && (!_fs.expiresAt || _nowFs < Number(_fs.expiresAt))) fsMap[String(_v.id)] = _fs
   }
   const trxAll = await readJSON(env, 'Trx', [])
   const sold = trxAll.filter(t => t.status === 'Lunas' && String(t.produk) === String(kat.produkName)).reduce((a, t) => a + (Number(t.jumlah) || 0), 0)
@@ -1062,7 +1062,11 @@ async function handleManageState(env, msg, state) {
     if (!p.stok) p.stok = []
     for (const line of lines) {
       const parts = line.split('|')
-      p.stok.push({ info: parts[0], expired_at: parts[1] || null })
+      // expired_at: "30" (hari) → tanggal YYYY-MM-DD, samakan getExpiredDateWIB admin.js
+      let expAt = null
+      const nDays = Number(String(parts[1] || '').trim())
+      if (nDays > 0) { const d = new Date(Date.now() + 7 * 3600000); d.setUTCDate(d.getUTCDate() + nDays); expAt = d.toISOString().slice(0, 10) }
+      p.stok.push({ info: parts[0], expired_at: expAt })
     }
     await writeJSON(env, 'Produk', produk)
     await recordStokBaru(env, state.kode, lines.length)

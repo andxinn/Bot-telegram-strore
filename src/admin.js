@@ -1540,7 +1540,7 @@ export async function handleAdminState(env, msg, state) {
     ])
 
     try {
-      const res = await tgSendMessage(env, userChatId, userMsg, userKb, 'HTML')
+      const res = await tgSendMessage(env, t.userId, userMsg, userKb, 'HTML')
       if (res && !res.ok) {
         console.error('[tgSendMessage TICKET REPLY ERROR]', res)
       }
@@ -3048,7 +3048,7 @@ export async function handleAdminCallback(env, cq) {
       } else {
         const dot = age.ms > 3600000 ? '🔴 ' : (age.waitingAdmin ? '🟡 ' : '🔵 ')
         const cond = age.waitingAdmin ? 'belum dijawab' : 'menunggu user'
-        label = dot + t.ticketId + ' (' + t.userName + ') • ⏳ ' + age.label + ' • ' + cond
+        label = (dot + t.ticketId + ' (' + t.userName + ') • ⏳ ' + age.label + ' • ' + cond).slice(0, 60)
       }
       rows.push([{ text: label, callback_data: 'tk_adm_view_' + t.ticketId }])
     })
@@ -4466,11 +4466,14 @@ function escHtml(str) {
 export function ticketAge(t) {
   const last = (t.messages && t.messages.length) ? t.messages[t.messages.length - 1] : null
   const ref = (t.status === 'closed' && t.closedAt) ? t.closedAt : Date.now()
-  const start = t.lastActivityAt || Date.parse(t.createdAt || '') || ref
+  const waitingAdmin = !!last && last.sender === 'user' && t.status !== 'closed'
+  // waitingAdmin: hitung sejak pesan terakhir USER (createdAt), bukan lastActivityAt yang ke-reset tiap follow-up
+  const firstUserPush = (t.messages || []).find(m => m.sender === 'user')
+  const sinceUser = firstUserPush && firstUserPush.at ? Number(firstUserPush.at) : Date.parse(t.createdAt || '')
+  const start = (waitingAdmin && sinceUser) ? sinceUser : (t.lastActivityAt || Date.parse(t.createdAt || '') || ref)
   const ms = Math.max(0, ref - start)
   const m = Math.floor(ms / 60000)
   const label = m < 60 ? m + 'm' : (Math.floor(m / 60) + 'j ' + (m % 60) + 'm')
-  const waitingAdmin = !!last && last.sender === 'user' && t.status !== 'closed'
   return { ms, label, waitingAdmin }
 }
 

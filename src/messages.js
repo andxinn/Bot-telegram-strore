@@ -1511,7 +1511,10 @@ function escH(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-async function sendTxLog(env, { type, user, produk, varian, total, reason, fileTxtContent, fileName }) {
+async function sendTxLog(env, { type, user, produk, varian, total, reason, fileTxtContent, fileName, qty, provider, role }) {
+  const cfg = await readJSON(env, 'BotConfig', {})
+  if (type === 'success' && cfg.txlogSuccess === false) return
+  if (type !== 'success' && cfg.txlogFailed === false) return
   const targetChannel = ChannelLog || InvoiceLogger
   if (!targetChannel) return
 
@@ -1523,10 +1526,15 @@ async function sendTxLog(env, { type, user, produk, varian, total, reason, fileT
     targetThreadId = parts[1]
   }
 
-  const username = user.username ? '@' + String(user.username).replace(/@/g, '') : 'Tidak ada username'
-  const userId = user.id || user.chatId || '0'
+  // Sensor ID: 6242090623 -> 6242090**** (sama seperti leaderboard).
+  // Toggle txlogMask: false = tampil full (admin view).
+  const rawId = String(user.id || user.chatId || '0')
+  const maskId = (s) => s.length <= 4 ? s : s.slice(0, -4) + '****'
+  const dispId = cfg.txlogMask === false ? rawId : maskId(rawId)
+
+  const judul = [produk, varian].filter(v => v && v !== '-').join(' - ') || '-'
   const cleanTotal = ParseIdr(total)
-  
+
   const d = new Date()
   const jakartaTime = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }))
   const dd = ('0' + jakartaTime.getDate()).slice(-2)
@@ -1534,41 +1542,37 @@ async function sendTxLog(env, { type, user, produk, varian, total, reason, fileT
   const yyyy = jakartaTime.getFullYear()
   const hh = ('0' + jakartaTime.getHours()).slice(-2)
   const mi = ('0' + jakartaTime.getMinutes()).slice(-2)
-  const waktu = `${dd}-${mm}-${yyyy} ${hh}:${mi} WIB`
+  const ss = ('0' + jakartaTime.getSeconds()).slice(-2)
+  const waktu = dd + '-' + mm + '-' + yyyy + ' ' + hh + ':' + mi + ':' + ss
 
-  if (type === 'success') {
-    let logText = '🟩 <b>LOG TRANSAKSI SUKSES</b> 🟩\n'
-    logText += '━━━━━━━━━━━━━━━━━━━━━━━\n'
-    logText += '• Pembeli : ' + escH(username) + ' (<code>' + userId + '</code>)\n'
-    logText += '• Produk  : ' + escH(produk) + ' (' + escH(varian || '-') + ')\n'
-    logText += '• Waktu   : ' + waktu + '\n'
-    logText += '• Total   : ' + cleanTotal + ' (Lunas)\n'
-    logText += '━━━━━━━━━━━━━━━━━━━━━━━\n'
-    
-    try {
-      if (fileTxtContent && fileName) {
-        await tgSendDocument(env, targetChatId, fileTxtContent, fileName, logText, null, 'HTML', targetThreadId)
-      } else {
-        await tgSendMessage(env, targetChatId, logText, null, 'HTML', targetThreadId)
-      }
-    } catch (e) {
-      console.error('[sendTxLog success error]', e.message)
-    }
-  } else {
-    let logText = '🟥 <b>LOG TRANSAKSI GAGAL</b> 🟥\n'
-    logText += '━━━━━━━━━━━━━━━━━━━━━━━\n'
-    logText += '• Pembeli : ' + escH(username) + ' (<code>' + userId + '</code>)\n'
-    logText += '• Produk  : ' + escH(produk) + ' (' + escH(varian || '-') + ')\n'
-    logText += '• Waktu   : ' + waktu + '\n'
-    logText += '• Total   : ' + cleanTotal + '\n'
-    logText += '• Alasan  : ' + escH(reason || 'Dibatalkan') + '\n'
-    logText += '━━━━━━━━━━━━━━━━━━━━━━━\n'
-    
-    try {
+  const prov = String(provider || '').toLowerCase()
+  const metode = prov.includes('saldo') ? 'Saldo' : 'QRIS'
+  const jml = Number(qty) > 0 ? Number(qty) : 1
+  const r = role || 'User'
+
+  const S = '━━━━━━━━━━━━━━━━━━━━'
+  const head = type === 'success'
+    ? '𝗣𝗥𝗢𝗗𝗨𝗞 𝗗𝗜𝗚𝗜𝗧𝗔𝗟 𝗦𝗨𝗞𝗦𝗘𝗦'
+    : '𝗣𝗥𝗢𝗗𝗨𝗞 𝗗𝗜𝗚𝗜𝗧𝗔𝗟 𝗚𝗔𝗚𝗔𝗟'
+  const rows =
+    '» Client : ' + escH(dispId) + '\n' +
+    '» Role   : ' + escH(r) + '\n' +
+    '» Jumlah : ' + jml + ' item\n' +
+    '» Metode : ' + metode + '\n' +
+    '» Total  : ' + escH(cleanTotal) + '\n' +
+    '» Waktu  : ' + waktu +
+    (type !== 'success' ? '\n» Alasan : ' + escH(reason || 'Dibatalkan') : '')
+  const logText = S + '\n' + head + '\n' + S +
+    '\n<blockquote>' + escH(judul) + '</blockquote>\n<pre>' + rows + '</pre>\n' + S
+
+  try {
+    if (fileTxtContent && fileName) {
+      await tgSendDocument(env, targetChatId, fileTxtContent, fileName, logText, null, 'HTML', targetThreadId)
+    } else {
       await tgSendMessage(env, targetChatId, logText, null, 'HTML', targetThreadId)
-    } catch (e) {
-      console.error('[sendTxLog failed error]', e.message)
     }
+  } catch (e) {
+    console.error('[sendTxLog error]', e.message)
   }
 }
 

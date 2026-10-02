@@ -3375,12 +3375,92 @@ export async function handleAdminCallback(env, cq) {
       '*📢 CHANNEL & LOG*\nPengaturan integrasi grup dan log otomatis:',
       {
         inline_keyboard: [
+          [{ text: '🔔 Kelola Notifikasi Transaksi', callback_data: 'adm_notif' }],
           [{ text: '📢 Setting Channel Log Transaksi', callback_data: 'adm_set_channel_log_tx' }],
           [{ text: '🎫 Setting Log Tiket (Grup/Ch)', callback_data: 'adm_set_channel_ticket' }],
           [{ text: '💾 Setting Channel Backup DB', callback_data: 'adm_set_channel_backup' }],
           [{ text: '🔙 Kembali ke Settings', callback_data: 'adm_settings' }]
         ]
       }, 'Markdown'
+    )
+    return
+  }
+
+  // 🔔 Panel: Kelola Notifikasi Transaksi
+  // (adm_notif_set ditangani terpisah di bawah — jangan masuk startsWith ini)
+  if (data === 'adm_notif' || (data.startsWith('adm_notif_') && data !== 'adm_notif_set')) {
+    const cfg = await readJSON(env, 'BotConfig', {})
+    const cur = cfg.ChannelLog || '-'
+    const sOk = cfg.txlogSuccess !== false ? '✅ Aktif' : '❌ Nonaktif'
+    const fOk = cfg.txlogFailed !== false ? '✅ Aktif' : '❌ Nonaktif'
+    const mOk = cfg.txlogMask !== false ? '🙈 Sensor ID' : '👁 ID Full'
+
+    if (data === 'adm_notif_test') {
+      await tgAnswerCallbackQuery(env, cqId, '🧪 Mengirim tes ke target', false)
+      const { sendTxLog } = await import('./messages.js')
+      await sendTxLog(env, {
+        type: 'success',
+        user: { username: 'tester', id: fromId },
+        produk: 'Produk Contoh', varian: 'Varian Contoh',
+        total: 15000, qty: 1, provider: 'qris', role: 'User',
+        fileTxtContent: null, fileName: null
+      })
+      return
+    }
+
+    let next = {}
+    if (data === 'adm_notif_success') { cfg.txlogSuccess = cfg.txlogSuccess !== false ? false : true; next = { a: 'success', v: cfg.txlogSuccess } }
+    if (data === 'adm_notif_failed') { cfg.txlogFailed = cfg.txlogFailed !== false ? false : true; next = { a: 'failed', v: cfg.txlogFailed } }
+    if (data === 'adm_notif_mask') { cfg.txlogMask = cfg.txlogMask !== false ? false : true; next = { a: 'mask', v: cfg.txlogMask } }
+    if (next.a) {
+      await writeJSON(env, 'BotConfig', cfg)
+      await tgAnswerCallbackQuery(env, cqId, next.v ? 'Dihidupkan ✅' : 'Dimatikan ❌', false)
+      const { initConfig } = await import('./config.js')
+      await initConfig(env)
+    }
+
+    const cur2 = (await readJSON(env, 'BotConfig', {})).ChannelLog || '-'
+    const sOk2 = (await readJSON(env, 'BotConfig', {})).txlogSuccess !== false ? '✅ Aktif' : '❌ Nonaktif'
+    const fOk2 = (await readJSON(env, 'BotConfig', {})).txlogFailed !== false ? '✅ Aktif' : '❌ Nonaktif'
+    const mOk2 = (await readJSON(env, 'BotConfig', {})).txlogMask !== false ? '🙈 Sensor ID' : '👁 ID Full'
+    await tgEditMessageText(env, chatId, messageId,
+      '*🔔 NOTIFIKASI TRANSAKSI*\n' +
+      '━━━━━━━━━━━━\n' +
+      'Setiap pembelian otomatis dikirim ke grup/topik.\n\n' +
+      'Target : `' + cur2 + '`\n' +
+      'Notif Sukses : ' + sOk2 + '\n' +
+      'Notif Gagal : ' + fOk2 + '\n' +
+      'Sensor ID : ' + mOk2,
+      {
+        inline_keyboard: [
+          [{ text: '1️⃣ Atur Target Grup/Topik', callback_data: 'adm_notif_set' }],
+          [{ text: '2️⃣ Notif Sukses : ' + sOk2, callback_data: 'adm_notif_success' }],
+          [{ text: '3️⃣ Notif Gagal : ' + fOk2, callback_data: 'adm_notif_failed' }],
+          [{ text: '4️⃣ ' + mOk2, callback_data: 'adm_notif_mask' }],
+          [{ text: '5️⃣ Kirim Tes 🧪', callback_data: 'adm_notif_test' }],
+          [{ text: '🔙 Kembali ke Channel & Log', callback_data: 'adm_setfolder_channel' }]
+        ]
+      }, 'Markdown'
+    )
+    return
+  }
+
+  // 🔔 Tombol 1: masuk mode input target (3 langkah)
+  if (data === 'adm_notif_set') {
+    await writeJSON(env, 'adminState_' + fromId, { action: 'settings_channel_log', cardMessageId: messageId })
+    await tgEditMessageText(env, chatId, messageId,
+      '*ATUR TARGET NOTIFIKASI*\n' +
+      'LANGKAH 1/3 - Aktifkan Topik di Grup\n' +
+      'Buka grup kamu, ketuk nama grup di atas, pilih Pengaturan Grup, lalu aktifkan Topik. ' +
+      'Kalau grup kamu sudah ada topiknya, lewati langkah ini.\n\n' +
+      'LANGKAH 2/3 - Masukkan Bot ke Grup\n' +
+      'Tambahkan bot ini ke grup, lalu jadikan admin agar bisa kirim pesan. ' +
+      'Cara: buka info grup, Tambah Anggota, cari nama bot ini, setelah masuk buka Admin lalu aktifkan Izin Kirim Pesan.\n\n' +
+      'LANGKAH 3/3 - Salin dan Tempel Tautan Topik\n' +
+      'Buka topik yang kamu mau, ketuk nama topik di atas, ketuk ikon titik tiga, pilih Salin Tautan. ' +
+      'Tempel tautan itu ke sini. Contoh: `-1001234567890:5`\n\n' +
+      '_Ketik /batal bila tidak jadi._',
+      { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_notif' }]] }, 'Markdown'
     )
     return
   }

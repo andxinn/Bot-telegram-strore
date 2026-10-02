@@ -260,7 +260,7 @@ async function handleMessage(env, msg) {
   }
 
   if (text === 'Deposit' || text === '\ud83d\udcb3 Deposit') {
-    const sent = await tgSendMessage(env, chatId, '<b>Deposit Saldo</b>\n\nMasukkan jumlah deposit (angka):\n<blockquote>Min Rp1.000 – Maks Rp500.000</blockquote>', null, 'HTML')
+    const sent = await tgSendMessage(env, chatId, '<b>Deposit Saldo</b>\n\nMasukkan jumlah deposit (angka):\n<blockquote>Min Rp1.000 – Maks Rp500.000</blockquote>\nJika tidak jadi, kirim /batal', null, 'HTML')
     const promptMid = sent?.result?.message_id
     await writeJSON(env, 'depositState_' + fromId, { step: 'amount', promptMid })
     return

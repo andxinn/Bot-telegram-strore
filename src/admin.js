@@ -487,7 +487,8 @@ async function buildStokBaruBroadcast(env) {
   const tgl = wib.getUTCDate() + ' ' + bln + ' ' + wib.getUTCFullYear() + ' · ' + String(h).padStart(2, '0') + '.' + String(wib.getUTCMinutes()).padStart(2, '0') + ' WIB'
   let msg = '╭───〔 🆕 *STOK TERBARU* 〕───\n'
   msg += '┊ ' + salam + ', kak! 👋\n'
-  msg += '┊ Kabar baik, stok favoritmu restock 🛍️\n'
+  msg += '┊ Kabar baik, stok favoritmu\n'
+  msg += '┊ restock 🛍️\n'
   msg += '┊ ──────────────────\n'
   for (const prod of order) {
     msg += '┊ 📦 ' + mdSafe(String(prod).toUpperCase()) + '\n'
@@ -500,7 +501,8 @@ async function buildStokBaruBroadcast(env) {
     msg += '┊ ──────────────────\n'
   }
   msg += '┊ 📅 ' + tgl + '\n'
-  msg += '┊ 🙏 Buruan diorder ya kak, stok terbatas!\n'
+  msg += '┊ 🙏 Buruan diorder ya kak,\n'
+  msg += '┊ stok terbatas!\n'
   msg += '╰──────────────────'
   return msg
 }

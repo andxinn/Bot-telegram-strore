@@ -1,7 +1,7 @@
 import { NamaBot, StoreName, OwnerID, InvoiceLogger, BannerFileId, SimulatePayment, SimulateDelay, orderBotName } from './config.js'
 import { readJSON, writeJSON, deleteKey, readText, writeText, existsKey } from './kv.js'
 import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgEditMessageText, tgEditMessageMedia, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendDocumentFile, tgSendSticker, tgCloseForumTopic } from './telegram.js'
-import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam, generateTrxId, generateOrderId, expiredTime, parseExpiredWIB } from './helpers.js'
+import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam, generateTrxId, generateOrderId, generateUniqueOrderId, expiredTime, parseExpiredWIB } from './helpers.js'
 import { getUser, addUser, addSaldo, cekSaldo, minSaldo, isOwner, getRole, acquireLock, releaseLock } from './user.js'
 import { getManagePanel, getMainMenuKeyboard } from './keyboard.js'
 import { generateQris } from './qris.js'

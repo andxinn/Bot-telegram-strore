@@ -1133,7 +1133,7 @@ async function showPopularProducts(env, chatId, fromId) {
   const medalOf = (i) => medals[i] || ''
   const fmtWeek = (list) => {
     if (list.length === 0) return '┊ _Belum ada penjualan_\n'
-    return list.slice(0, 3).map((item, i) => '┊ `' + (i + 1) + '. ' + mdSafe(item.name) + ' (' + item.qty + 'x)' + (medalOf(i) ? ' ' + medalOf(i) : '') + '`\n').join('')
+    return list.slice(0, 3).map((item, i) => '┊ `' + (i + 1) + '. ' + mdSafe(item.name) + (medalOf(i) ? ' ' + medalOf(i) : '') + '`\n┊ `   ' + item.qty + 'x terjual`\n').join('')
   }
   let cap = '╭───〔 🔥 *PRODUK POPULER* 〕───\n'
   cap += '┊ ⚡ MINGGU INI\n'
@@ -1147,7 +1147,7 @@ async function showPopularProducts(env, chatId, fromId) {
     cap += '┊ _Belum ada penjualan_\n'
   } else {
     aList.forEach((item, index) => {
-      cap += '┊ `' + (index + 1) + '. ' + mdSafe(item.name) + ' (' + item.qty + 'x)' + (medalOf(index) ? ' ' + medalOf(index) : '') + '`\n'
+      cap += '┊ `' + (index + 1) + '. ' + mdSafe(item.name) + (medalOf(index) ? ' ' + medalOf(index) : '') + '`\n┊ `   ' + item.qty + 'x terjual`\n'
     })
   }
   cap += '╰──────────────────\n\n'

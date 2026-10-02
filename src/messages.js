@@ -1,6 +1,6 @@
 import { NamaBot, OwnerID, ChannelLog, InvoiceLogger, SimulatePayment, ButtonMenu, BannerFileId, bannerListB64, orderBotName, caraOrderText, leaderboardEnabled, leaderboardBanner, channelTicket } from './config.js'
 import { readJSON, writeJSON, readText, writeText, deleteKey, existsKey } from './kv.js'
-import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgSendDocument, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile } from './telegram.js'
+import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgSendDocument, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile, tgSetReaction } from './telegram.js'
 import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getTanggalJam, sleep, generateTrxId, expiredTime, loadingBar, generateTicketId } from './helpers.js'
 import { getUserList, getUser, addUser, addSaldo, cekSaldo, isOwner, getRole, isBanned } from './user.js'
 import { getMainMenuKeyboard, getProductNumberKeyboard } from './keyboard.js'
@@ -1129,41 +1129,32 @@ async function showPopularProducts(env, chatId, fromId) {
   const mList = getPopularList(oneMonth)
   const aList = getPopularList(null)
 
-  let cap = '╭───〔 ✧ PRODUK POPULER 〕───\n'
-  cap += '├──────────────────\n'
-  
-  cap += '⚡ *Rame Dibeli Minggu Ini*\n'
-  if (wList.length === 0) {
-    cap += '┊ _Belum ada penjualan minggu ini_\n'
-  } else {
-    wList.forEach((item, index) => {
-      cap += '┊ ' + (index + 1) + '. ' + mdSafe(item.name) + ' (' + item.qty + 'x) ✧\n'
-    })
+  const medals = ['🥇', '🥈', '🥉']
+  const medalOf = (i) => medals[i] || ''
+  const fmtWeek = (list) => {
+    if (list.length === 0) return '┊ _Belum ada penjualan_\n'
+    return list.slice(0, 3).map((item, i) => '┊ `' + (i + 1) + '. ' + mdSafe(item.name) + ' (' + item.qty + 'x)' + (medalOf(i) ? ' ' + medalOf(i) : '') + '`\n').join('')
   }
-  cap += '├──────────────────\n'
-
-  cap += '📅 *Rame Dibeli Bulan Ini*\n'
-  if (mList.length === 0) {
-    cap += '┊ _Belum ada penjualan bulan ini_\n'
-  } else {
-    mList.forEach((item, index) => {
-      cap += '┊ ' + (index + 1) + '. ' + mdSafe(item.name) + ' (' + item.qty + 'x) ✧\n'
-    })
-  }
-  cap += '├──────────────────\n'
-
-  cap += '🏆 *Paling Banyak Dibeli (All-Time)*\n'
+  let cap = '╭───〔 🔥 *PRODUK POPULER* 〕───\n'
+  cap += '┊ ⚡ MINGGU INI\n'
+  cap += fmtWeek(wList)
+  cap += '┊ ──────────────────\n'
+  cap += '┊ 📅 BULAN INI\n'
+  cap += fmtWeek(mList)
+  cap += '┊ ──────────────────\n'
+  cap += '┊ 🏆 TERLARIS SEPANJANG MASA\n'
   if (aList.length === 0) {
     cap += '┊ _Belum ada penjualan_\n'
   } else {
     aList.forEach((item, index) => {
-      cap += '┊ ' + (index + 1) + '. ' + mdSafe(item.name) + ' (' + item.qty + 'x)\n'
+      cap += '┊ `' + (index + 1) + '. ' + mdSafe(item.name) + ' (' + item.qty + 'x)' + (medalOf(index) ? ' ' + medalOf(index) : '') + '`\n'
     })
   }
   cap += '╰──────────────────\n\n'
-  cap += 'Silakan pilih menu di bawah '
+  cap += 'Silakan pilih menu di bawah 👇'
 
-  await sendTextCard(env, chatId, cap, getMainMenuKeyboard(), fromId)
+  const finalMid = await sendTextCard(env, chatId, cap, getMainMenuKeyboard(), fromId)
+  if (finalMid) { try { await tgSetReaction(env, chatId, finalMid, '🔥', true) } catch (e) {} }
 }
 
 async function showLeaderboard(env, chatId, fromId) {

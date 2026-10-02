@@ -695,21 +695,22 @@ async function handleCallbackQuery(env, cq) {
       sucFileS += 'PRODUK:\n'
       sucFileS += taken.map(s => s.info || s.akun || s.isi || (typeof s === 'string' ? s : JSON.stringify(s))).map((item, i) => (i + 1) + '. ' + item).join('\n')
       sucFileS += '\n\nTerima kasih sudah berbelanja!\n' + (NamaBot || '')
-      let sucCapS = '*PEMBELIAN BERHASIL* \u2705\n\n'
-      sucCapS += '\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n'
-      sucCapS += '\u2502 *Produk:* ' + os.produk + '\n'
-      sucCapS += '\u2502 *Variasi:* ' + os.varian + '\n'
-      sucCapS += '\u2502 *Jumlah:* x' + jml + '\n'
-      sucCapS += '\u2502 *Total:* Rp' + tot.toLocaleString('id-ID') + '\n'
-      sucCapS += '\u2502 *Sisa Saldo:* Rp' + newBal.toLocaleString('id-ID') + '\n'
-      sucCapS += '\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n'
-      sucCapS += 'ID Transaksi:\n`' + trxId + '`'
+      let sucCapS = '╭───〔 ✅ *PEMBELIAN BERHASIL* 〕───\n' +
+      '┊ 🛍️ RINCIAN PESANAN\n' +
+      '┊ `' + String('Produk').padEnd(10, ' ') + ' : ' + os.produk + '`\n' +
+      '┊ `' + String('Variasi').padEnd(10, ' ') + ' : ' + os.varian + '`\n' +
+      '┊ `' + String('Jumlah').padEnd(10, ' ') + ' : x' + jml + '`\n' +
+      '┊ `' + String('Total').padEnd(10, ' ') + ' : Rp' + tot.toLocaleString('id-ID') + '`\n' +
+      '┊ `' + String('Sisa Saldo').padEnd(10, ' ') + ' : Rp' + newBal.toLocaleString('id-ID') + '`\n' +
+      '┊ ──────────────────\n' +
+      '┊ 🧾 `ID : ' + trxId + '`\n' +
+      '╰──────────────────\n\nAkun dikirim di file .txt di atas 👆'
       const cfg = await readJSON(env, 'BotConfig', {})
       if (cfg.successSticker) {
-        await tgSendDocument(env, chatId, sucFileS, trxId + '.txt', escapeMarkdown(sucCapS))
+        await tgSendDocument(env, chatId, sucFileS, trxId + '.txt', sucCapS)
         await tgSendSticker(env, chatId, cfg.successSticker, getMainMenuKeyboard())
       } else {
-        await tgSendDocument(env, chatId, sucFileS, trxId + '.txt', escapeMarkdown(sucCapS), getMainMenuKeyboard())
+        await tgSendDocument(env, chatId, sucFileS, trxId + '.txt', sucCapS, getMainMenuKeyboard())
       }
       if (InvoiceLogger) {
         await tgSendMessage(env, InvoiceLogger,

@@ -385,7 +385,15 @@ async function processPaymentSuccess(env, session, matchData) {
   const katMatch = kategoriList.find(k => String(k.produkId) === String(p.category))
   const snkData = katMatch ? snkList.find(s => String(s.id) === String(katMatch.id)) : null
   const snkText = snkData ? snkData.snk : 'Tidak ada syarat dan ketentuan'
-  let suc = '*PEMBELIAN BERHASIL \u2705*\nTerima kasih, telah melakukan pembelian produk kami!\n\n*Rincian Pesanan:*\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e  \n\u2502 *Produk:* ' + details.produk + '\n\u2502 *Variasi:* ' + details.produk_nama + '\n\u2502 *Jumlah Pesanan:* x' + jumlahPesanan + '  \n\u2502 *Total Pembayaran:* ' + ParseIdr(details.total_amount) + ' \n\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f  \n\nID Transaksi:\n`' + session.id + '`'
+  let suc = '╭───〔 ✅ *PEMBELIAN BERHASIL* 〕───\n' +
+  '┊ 🛍️ RINCIAN PESANAN\n' +
+  '┊ `' + String('Produk').padEnd(10, ' ') + ' : ' + details.produk + '`\n' +
+  '┊ `' + String('Variasi').padEnd(10, ' ') + ' : ' + details.produk_nama + '`\n' +
+  '┊ `' + String('Jumlah').padEnd(10, ' ') + ' : x' + jumlahPesanan + '`\n' +
+  '┊ `' + String('Total').padEnd(10, ' ') + ' : ' + ParseIdr(details.total_amount) + '`\n' +
+  '┊ ──────────────────\n' +
+  '┊ 🧾 `ID : ' + session.id + '`\n' +
+  '╰──────────────────\n\nAkun dikirim di file .txt di atas 👆'
   let fileContent = 'INFO ORDER\n'
   fileContent += 'Nomor: ' + session.id + '\n'
   fileContent += 'Tanggal: ' + formatWIB(new Date().toISOString()) + '\n'
@@ -399,10 +407,10 @@ async function processPaymentSuccess(env, session, matchData) {
   fileContent += '\n\nTerima kasih sudah berbelanja!\n' + (NamaBot || '')
   const cfg = await readJSON(env, 'BotConfig', {})
   if (cfg.successSticker) {
-    await tgSendDocument(env, details.userId, fileContent, session.id + '.txt', escapeMarkdown(suc))
+    await tgSendDocument(env, details.userId, fileContent, session.id + '.txt', suc)
     await tgSendSticker(env, details.userId, cfg.successSticker, getMainMenuKeyboard())
   } else {
-    await tgSendDocument(env, details.userId, fileContent, session.id + '.txt', escapeMarkdown(suc), getMainMenuKeyboard())
+    await tgSendDocument(env, details.userId, fileContent, session.id + '.txt', suc, getMainMenuKeyboard())
   }
   if (InvoiceLogger) {
     const tj = getTanggalJam()

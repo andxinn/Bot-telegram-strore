@@ -414,14 +414,15 @@ async function handleCallbackQuery(env, cq) {
     const produk = await readJSON(env, 'Produk', [])
     if (produk.length === 0) { await editCard(env, cq, 'Maaf, tidak ada produk tersedia.', null); return }
     await tgAnswerCallbackQuery(env, cq.id, '🔄 Stok diperbarui', false)
-    let text = '╭───〔 📦 INFO STOK 〕\n'
-    text += '┊ 🕒 ' + getDate('Asia/Jakarta') + ' WIB\n'
+    let text = '╭───〔 ☰ INFO STOK 〕───\n'
+    text += '┊ ⌚ ' + getTanggalJam().tanggal + ' ' + getTanggalJam().jam + ' WIB\n'
     text += '├──────────────────\n'
     let skipped = 0
     for (const v of produk) {
       const cnt = (v.stok ? v.stok.length : 0)
-      const mark = cnt > 0 ? '✅' : '❌'
-      const row = '┊ ' + mark + ' *' + v.id + '* · ' + mdSafe(v.nameproduct) + ' ➜ ' + cnt + 'x\n'
+      const row = '┊ *' + v.id + '*. ' + mdSafe(v.nameproduct) + '\n'
+        + '┊    ├ Harga : `' + ParseIdr(v.price || 0) + '`\n'
+        + '┊    └ Stok  : `' + (cnt > 0 ? cnt + 'x ✓' : 'Habis ✕') + '`\n'
       if ((text + row).length > 3600) { skipped++; continue }
       text += row
     }

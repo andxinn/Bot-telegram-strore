@@ -265,6 +265,7 @@ function adminMainPanel() {
       [{ text: '📦 Produk & Stok', callback_data: 'adm_cat_produk' }, { text: '🔥 Promo', callback_data: 'adm_cat_promo' }],
       [{ text: '💳 Pembayaran', callback_data: 'adm_cat_bayar' }, { text: '📢 Komunikasi', callback_data: 'adm_cat_komunikasi' }],
       [{ text: '👥 Pengguna', callback_data: 'adm_cat_user' }, { text: '⚙️ Sistem', callback_data: 'adm_cat_sistem' }],
+      [{ text: '❓ Panduan Setup', callback_data: 'adm_panduan' }],
       [{ text: '❌ Tutup', callback_data: 'adm_tutup' }]
     ]
   }
@@ -405,6 +406,19 @@ async function checkAdmin(env, fromId, chatId) {
 
 // ─── Show Admin Panel ────────────────────────────────────────────
 export async function showAdminPanel(env, chatId) {
+  // Peringatan konfigurasi bahaya — orang awam tidak tahu SimulatePayment/sandbox = auto-lunas
+  try {
+    const { SimulatePayment, Mode } = await import('./config.js')
+    const { getActiveGateway } = await import('./pakasir.js')
+    const dangers = []
+    if (SimulatePayment) dangers.push('🚨 *SIMULASI BAYAR AKTIF* — semua order lunas tanpa bayar. Matikan via env SIMULATE_PAYMENT=false.')
+    try {
+      const ag = await getActiveGateway(env)
+      if (ag && ag.gw && String(ag.gw.mode || '').toLowerCase() === 'sandbox' && String(Mode || '').toLowerCase() === 'production')
+        dangers.push('⚠️ Gateway *' + ag.name + '* masih mode *sandbox* di production — tombol 🧪 Simulasi Bayar tampil ke user.')
+    } catch (e) {}
+    if (dangers.length > 0) await tgSendMessage(env, chatId, dangers.join('\n'), null, 'Markdown')
+  } catch (e) {}
   await tgSendMessage(env, chatId,
     '*🛠️ ADMIN PANEL*\n\nPilih menu yang ingin dikelola:',
     adminMainPanel(), 'Markdown'
@@ -1787,6 +1801,20 @@ export async function handleAdminCallback(env, cq) {
     await tgAnswerCallbackQuery(env, cqId, '❌ Panel admin ditutup', false)
     const { tgDeleteMessage } = await import('./telegram.js')
     await tgDeleteMessage(env, chatId, messageId)
+    return
+  }
+
+  // ─ Panduan setup 3 langkah (orang awam) ─
+  if (data === 'adm_panduan') {
+    await tgAnswerCallbackQuery(env, cqId, '❓ Membuka panduan', false)
+    await tgEditMessageText(env, chatId, messageId,
+      '*❓ PANDUAN SETUP — 3 LANGKAH*\n\n' +
+      '*Langkah 1 — Isi toko:*\nSistem → Identitas & Info (nama toko, CS)\n\n' +
+      '*Langkah 2 — Pasang banner:*\nSistem → Media & Banner (foto sambutan)\n\n' +
+      '*Langkah 3 — Aktifkan bayar:*\n💳 Pembayaran → pilih gateway → isi API key → mode *production*\n\n' +
+      '_Lalu tambah kategori + produk + stok, bot siap jualan._',
+      { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_panel' }]] }, 'Markdown'
+    )
     return
   }
 

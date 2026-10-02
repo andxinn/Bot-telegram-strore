@@ -602,14 +602,15 @@ async function showStockInfo(env, chatId) {
     await tgSendMessage(env, chatId, 'Maaf, toko ini tidak memiliki stok yang tersedia.')
     return
   }
-  let cap = '╭───〔 ☰ INFO STOK 〕\n'
+  let cap = '╭───〔 ☰ INFO STOK 〕───\n'
   cap += '┊ ⌚ ' + getTanggalJam().tanggal + ' ' + getTanggalJam().jam + ' WIB\n'
   cap += '├──────────────────\n'
   let skippedStock = 0
   for (const v of withStock) {
     const cnt = (v.stok ? v.stok.length : 0)
-    const mark = cnt > 0 ? '✓' : '✕'
-    const line = '┊ ' + mark + ' *' + v.id + '* · ' + mdSafe(v.nameproduct) + ' ⟜ ' + cnt + 'x\n'
+    const line = '┊ *' + v.id + '*. ' + mdSafe(v.nameproduct) + '\n'
+      + '┊    ├ Harga : `' + ParseIdr(v.price || 0) + '`\n'
+      + '┊    └ Stok  : `' + (cnt > 0 ? cnt + 'x ✓' : 'Habis ✕') + '`\n'
     if ((cap.length + line.length) > 3600) { skippedStock++; continue }
     cap += line
   }

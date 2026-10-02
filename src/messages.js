@@ -1,6 +1,6 @@
 import { NamaBot, OwnerID, ChannelLog, InvoiceLogger, SimulatePayment, ButtonMenu, BannerFileId, bannerListB64, orderBotName, caraOrderText, leaderboardEnabled, leaderboardBanner, channelTicket } from './config.js'
 import { readJSON, writeJSON, readText, writeText, deleteKey, existsKey } from './kv.js'
-import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgSendDocument, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile, tgSetReaction } from './telegram.js'
+import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgSendDocument, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile, tgSetReaction, tgGetChat } from './telegram.js'
 import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getTanggalJam, sleep, generateTrxId, expiredTime, loadingBar, generateTicketId } from './helpers.js'
 import { getUserList, getUser, addUser, addSaldo, cekSaldo, isOwner, getRole, isBanned } from './user.js'
 import { getMainMenuKeyboard, getProductNumberKeyboard } from './keyboard.js'
@@ -282,7 +282,7 @@ async function handleMessage(env, msg) {
   }
 
   if (text === '🏆 Leaderboard') {
-    await showLeaderboard(env, chatId, fromId)
+    await showLeaderboard(env, chatId, fromId, msg.from.username || '')
     return
   }
 
@@ -1157,7 +1157,7 @@ async function showPopularProducts(env, chatId, fromId) {
   if (finalMid) { try { await tgSetReaction(env, chatId, finalMid, '🔥', true) } catch (e) {} }
 }
 
-async function showLeaderboard(env, chatId, fromId) {
+async function showLeaderboard(env, chatId, fromId, fromUsername = '') {
   if (leaderboardEnabled === false) {
     await tgSendMessage(env, chatId, '⚠️ *Menu Leaderboard saat ini sedang dinonaktifkan oleh Admin.*', getMainMenuKeyboard(), 'Markdown')
     return
@@ -1165,7 +1165,7 @@ async function showLeaderboard(env, chatId, fromId) {
 
   const trx = await readJSON(env, 'Trx', [])
   const users = await getUserList(env)
-  
+
   const stats = {}
   for (const t of trx) {
     if (t.status !== 'Lunas') continue
@@ -1181,28 +1181,55 @@ async function showLeaderboard(env, chatId, fromId) {
     .map(([uid, data]) => {
       const u = users.find(usr => String(usr.chatId) === uid)
       return {
+        uid,
         name: u ? u.name : 'User',
         total: data.total,
         count: data.count
       }
     })
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 10)
+  // Admin & owner bot tidak masuk leaderboard
+  const filtered = []
+  for (const item of sorted) {
+    if (isOwner(item.uid)) continue
+    if (await getRole(env, item.uid)) continue
+    filtered.push(item)
+  }
+  filtered.sort((a, b) => b.total - a.total)
+  filtered.splice(10)
 
   let cap = '╭───〔 🏆 LEADERBOARD 〕───\n'
   cap += '┊ *Top 10 Pembeli Terbanyak*\n'
   cap += '├──────────────────\n'
 
-  if (sorted.length === 0) {
+  if (filtered.length === 0) {
     cap += '┊ _Belum ada data peringkat_\n'
   } else {
-    const medals = ['🥇', '🥈', '🥉']
-    sorted.forEach((item, index) => {
-      const prefix = medals[index] || (index + 1) + '.'
-      const formattedTotal = ParseIdr(item.total)
-      cap += '┊ ' + prefix + ' *' + mdSafe(item.name) + '*\n'
-      cap += '┊   ├ Belanja : `' + formattedTotal + '`\n'
-      cap += '┊   └ Order   : `' + item.count + ' kali`\n'
+    const isAdmin = isOwner(fromId) || !!(await getRole(env, fromId))
+    // mdSafe menghapus karakter * → sensor **** harus dipasang SETELAH mdSafe,
+    // kalau tidak bintangnya ikut terbuang dan sensor tidak kelihatan.
+    const mask = (v) => {
+      const s = String(v)
+      if (s.length <= 4) return s
+      return s.slice(0, -4) + '****'
+    }
+    // Username Telegram user lain harus diambil realtime via getChat (UserList
+    // hanya menyimpan first_name). Fallback ke nama UserList bila tidak ada @.
+    for (const item of filtered) {
+      try {
+        const r = await tgGetChat(env, item.uid)
+        if (r && r.ok && r.result && r.result.username) {
+          item.tgUsername = r.result.username
+        }
+      } catch (e) {}
+    }
+    filtered.forEach((item, index) => {
+      const uname = item.tgUsername || item.name
+      const dispUid = isAdmin ? mdSafe(item.uid) : mask(mdSafe(item.uid))
+      const dispName = isAdmin ? mdSafe(uname) : mask(mdSafe(uname))
+      cap += '┊ *' + (index + 1) + '*. `' + dispUid + '`\n'
+      cap += '┊    Username: `' + dispName + '`\n'
+      cap += '┊    ├ Belanja : `' + ParseIdr(item.total) + '`\n'
+      cap += '┊    └ Order   : `' + item.count + ' kali`\n'
     })
   }
   cap += '╰──────────────────\n\n'

@@ -161,6 +161,15 @@ function boxFormat(title, lines) {
 
 // --- generateOrderId: format PREFIX-DDMMYY-XXXX (WIB), anti-duplikat ---
 // Pendek (14-17 char); cek unik sebelum dipakai via orderIdUnique()
+// SATU JALUR ID: prefix selalu dibaca dari KV BotConfig (live, tanpa perlu restart)
+async function getOrderPrefix(env) {
+  try {
+    const bcfg = await readJSON(env, 'BotConfig', {})
+    const clean = String(bcfg.orderBotName || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)
+    if (clean) return clean
+  } catch (e) {}
+  return null
+}
 function generateOrderId(namaBot) {
   const clean = (namaBot || 'BOT').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'BOT'
   const now = new Date()
@@ -188,11 +197,12 @@ async function orderIdUnique(env, id) {
 
 // Buat ID unik (retry bila tabrakan, peluang sangat kecil)
 async function generateUniqueOrderId(env, namaBot, tries = 5) {
+  const prefix = await getOrderPrefix(env)
   for (let i = 0; i < tries; i++) {
-    const id = generateOrderId(namaBot)
+    const id = generateOrderId(prefix || namaBot)
     if (await orderIdUnique(env, id)) return id
   }
-  return generateOrderId(namaBot) + '-' + Math.floor(Math.random() * 900 + 100)
+  return generateOrderId(prefix || namaBot) + '-' + Math.floor(Math.random() * 900 + 100)
 }
 
 

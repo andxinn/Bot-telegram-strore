@@ -1286,8 +1286,9 @@ async function handleCallbackQuery(env, cq) {
   }
   if (data.startsWith('riwayatdep_page_')) {
     const rwPage = parseInt(data.replace('riwayatdep_page_', ''))
+    const { isDeposit } = await import('./messages.js')
     const allTrx = await readJSON(env, 'Trx', [])
-    const myTrx = allTrx.filter(t => String(t.user_id) === String(fromId) && t.status === 'Lunas' && (t.tipe === 'deposit' || t.produk === 'Deposit Saldo'))
+    const myTrx = allTrx.filter(t => String(t.user_id) === String(fromId) && t.status === 'Lunas' && isDeposit(t))
     const PER_PAGE = 5
     const totalPg = Math.ceil(myTrx.length / PER_PAGE)
     if (rwPage < 1 || rwPage > totalPg) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Halaman tidak tersedia.', true); return }

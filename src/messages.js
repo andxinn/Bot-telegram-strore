@@ -1,7 +1,7 @@
 import { NamaBot, OwnerID, ChannelLog, InvoiceLogger, SimulatePayment, ButtonMenu, BannerFileId, bannerListB64, orderBotName, caraOrderText, leaderboardEnabled, leaderboardBanner, channelTicket } from './config.js'
 import { readJSON, writeJSON, readText, writeText, deleteKey, existsKey } from './kv.js'
 import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgSendDocument, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile, tgSetReaction, tgGetChat } from './telegram.js'
-import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getTanggalJam, sleep, generateTrxId, expiredTime, loadingBar, generateTicketId, sansBold } from './helpers.js'
+import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getTanggalJam, sleep, generateTrxId, generateUniqueOrderId, expiredTime, loadingBar, generateTicketId, sansBold } from './helpers.js'
 import { getUserList, getUser, addUser, addSaldo, cekSaldo, isOwner, getRole, isBanned } from './user.js'
 import { getMainMenuKeyboard, getProductNumberKeyboard } from './keyboard.js'
 import { handleCommand } from './commands.js'
@@ -717,13 +717,13 @@ function buildRiwayatView(userTrx, page, totalPages) {
     const id = (t.trxid || '-').replace(/[`_*\[\]]/g, '')
     const rp = 'Rp ' + Number(t.total || 0).toLocaleString('id-ID')
     if (i > 0) text += '──────────────────\n'
-    text += '`' + num + '. ' + id + '`\n'
-    text += '    Produk: ' + mdSafe(t.produk || '-') + '\n'
+    text += '*' + num + '.* ' + mdSafe(t.produk || '-') + '\n'
     text += '    Varian: ' + mdSafe(t.varian || '-') + '\n'
     text += '    Jumlah unit: ' + (Number(t.jumlah) || 1) + '\n'
     text += '    Total bayar: ' + rp + '\n'
     text += '    Metode: ' + payLabel(t) + '\n'
     text += '    Waktu: ' + shortDateTime(t.tanggal) + '\n'
+    text += '    ID TRX: `' + id + '`\n'
   })
   text += '━━━━━━━━━━━━━━━━━━'
   const nav = []
@@ -731,7 +731,10 @@ function buildRiwayatView(userTrx, page, totalPages) {
   if (pg < totalPages) nav.push({ text: 'Lanjut ➡️', callback_data: 'riwayat_page_' + (pg + 1) })
   const rows = []
   if (nav.length) rows.push(nav)
-  rows.push([{ text: '🔙 Kembali', callback_data: 'riwayat_menu' }])
+  rows.push([
+    { text: '🔙 Kembali', callback_data: 'riwayat_menu' },
+    { text: '🏠 Menu Utama', callback_data: 'to_menu' }
+  ])
   return { text: text, keyboard: { inline_keyboard: rows }, parseMode: 'Markdown' }
 }
 
@@ -749,11 +752,12 @@ function buildRiwayatDepositView(userTrx, page, totalPages) {
     const rp = 'Rp ' + Number(t.total || 0).toLocaleString('id-ID')
     const rpSaldo = 'Rp ' + Number(t.saldo || 0).toLocaleString('id-ID')
     if (i > 0) text += '──────────────────\n'
-    text += '`' + num + '. ' + id + '`\n'
+    text += '*' + num + '.* Deposit Saldo\n'
     text += '    Jumlah masuk: ' + rp + '\n'
     text += '    Saldo setelah: ' + rpSaldo + '\n'
     text += '    Metode: ' + payLabel(t) + '\n'
     text += '    Waktu: ' + shortDateTime(t.tanggal) + '\n'
+    text += '    ID TRX: `' + id + '`\n'
   })
   text += '━━━━━━━━━━━━━━━━━━'
   const nav = []
@@ -761,7 +765,10 @@ function buildRiwayatDepositView(userTrx, page, totalPages) {
   if (pg < totalPages) nav.push({ text: 'Lanjut ➡️', callback_data: 'riwayatdep_page_' + (pg + 1) })
   const rows = []
   if (nav.length) rows.push(nav)
-  rows.push([{ text: '🔙 Kembali', callback_data: 'riwayat_menu' }])
+  rows.push([
+    { text: '🔙 Kembali', callback_data: 'riwayat_menu' },
+    { text: '🏠 Menu Utama', callback_data: 'to_menu' }
+  ])
   return { text: text, keyboard: { inline_keyboard: rows }, parseMode: 'Markdown' }
 }
 
@@ -876,7 +883,7 @@ async function handleDepositState(env, msg, state) {
       }
       const depoFeeSw = calcFee(gwD, amount)
       const depoChargeSw = amount + depoFeeSw
-      const trxIdSw = generateTrxId()
+      const trxIdSw = await generateUniqueOrderId(env, orderBotName || NamaBot || 'BOT')
       const createdSw = await saweriaCreate(gwD, trxIdSw, depoChargeSw, {
         customerName: msg.from.first_name || 'Customer',
         email: (msg.from.username ? msg.from.username : ('u' + chatId)) + '@bot.local'
@@ -920,7 +927,7 @@ async function handleDepositState(env, msg, state) {
       }
       const depoFeeDk = calcFee(gwD, amount)
       const depoChargeDk = amount + depoFeeDk
-      const trxIdDk = generateTrxId()
+      const trxIdDk = await generateUniqueOrderId(env, orderBotName || NamaBot || 'BOT')
       const createdDk = await duitkuCreateQris(gwD, trxIdDk, depoChargeDk, {
         productDetails: 'Deposit ' + (msg.from.first_name || 'user'),
         customerName: msg.from.first_name || 'Customer',
@@ -989,7 +996,7 @@ async function handleDepositState(env, msg, state) {
     }
     const depoFee = calcFee(gwD, amount)
     const depoCharge = amount + depoFee
-    const trxId = generateTrxId()
+    const trxId = await generateUniqueOrderId(env, orderBotName || NamaBot || 'BOT')
     const createdD = await pakasirCreate(gwD, trxId, depoCharge)
     if (!createdD.ok) {
       await deleteKey(env, 'depositState_' + fromId)

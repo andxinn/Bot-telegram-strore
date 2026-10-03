@@ -172,6 +172,14 @@ async function handleMessage(env, msg) {
     '✧ Produk Populer', '🔥 Produk Populer', '🏆 Leaderboard'
   ]
   if (MAIN_BUTTONS.includes(text)) {
+    for (const k of ['depositState_', 'cekTrxState_', 'ticketState_']) {
+      try {
+        const st = await readJSON(env, k + fromId, null)
+        if (st && (st.promptMid || st.cardMessageId)) {
+          try { await tgDeleteMessage(env, chatId, st.promptMid || st.cardMessageId) } catch (e) {}
+        }
+      } catch (e) {}
+    }
     await deleteKey(env, 'depositState_' + fromId)
     await deleteKey(env, 'manageState_' + fromId)
     await deleteKey(env, 'orderState_' + fromId)
@@ -253,16 +261,19 @@ async function handleMessage(env, msg) {
   }
 
   if (text && (text === ButtonMenu.list || text.includes('List Produk'))) {
+    await cleanFlow(env, chatId, fromId, msg.message_id)
     await showProductList(env, chatId, fromId, fromName)
     return
   }
 
   if (text && (text === ButtonMenu.stock || text.includes('Stok') || text.toLowerCase().includes('stock'))) {
-    await showStockInfo(env, chatId)
+    await cleanFlow(env, chatId, fromId, msg.message_id)
+    await showStockInfo(env, chatId, fromId)
     return
   }
 
   if (text === 'Riwayat Transaksi' || text === '📜 Riwayat Transaksi') {
+    await cleanFlow(env, chatId, fromId, msg.message_id)
     await showRiwayat(env, chatId, fromId)
     return
   }
@@ -275,26 +286,31 @@ async function handleMessage(env, msg) {
   }
 
   if (text === 'Profil' || text === '👤 Profil') {
+    await cleanFlow(env, chatId, fromId, msg.message_id)
     await showProfil(env, chatId, fromId)
     return
   }
 
   if (text === 'Cara Order' || text === '\u2753 Cara Order') {
-    await showCaraOrder(env, chatId)
+    await cleanFlow(env, chatId, fromId, msg.message_id)
+    await showCaraOrder(env, chatId, fromId)
     return
   }
 
   if (text === '✧ Produk Populer' || text === '🔥 Produk Populer') {
+    await cleanFlow(env, chatId, fromId, msg.message_id)
     await showPopularProducts(env, chatId, fromId)
     return
   }
 
   if (text === '🏆 Leaderboard') {
+    await cleanFlow(env, chatId, fromId, msg.message_id)
     await showLeaderboard(env, chatId, fromId, msg.from.username || '')
     return
   }
 
   if (text === '🎫 Tiket Bantuan' || text === 'Tiket Bantuan') {
+    await cleanFlow(env, chatId, fromId, msg.message_id)
     await showTicketMenu(env, chatId, fromId)
     return
   }
@@ -338,12 +354,13 @@ async function handleMessage(env, msg) {
   if (text.includes('Selanjutnya') || text.includes('Sebelumnya')) {
     const curPage = await readJSON(env, 'listPage_' + fromId, 1)
     const newPage = text.includes('Selanjutnya') ? curPage + 1 : curPage - 1
+    await cleanFlow(env, chatId, fromId, msg.message_id)
     await showProductList(env, chatId, fromId, fromName, newPage)
     return
   }
 
   if (/^\d+$/.test(text)) {
-    try { await tgDeleteMessage(env, chatId, msg.message_id) } catch (e) {}
+    await cleanFlow(env, chatId, fromId, msg.message_id)
     await showVariants(env, chatId, parseInt(text), fromId)
     return
   }
@@ -351,6 +368,22 @@ async function handleMessage(env, msg) {
   const fbUser = await getUser(env, chatId) || await addUser(env, chatId, fromName)
   const mainKbFb = getMainMenuKeyboard()
   await tgSendMessage(env, chatId, 'Halo Kak *' + mdSafe(fbUser.name) + '*' + ' 😊\n\nSilakan pilih menu:', mainKbFb, 'Markdown')
+}
+
+// ─── Chat bersih: hapus perintah user + kartu flow lama (private saja) ───
+// AMAN: hanya 2 pesan itu. TIDAK sentuh: pesan sukses+file, riwayat detail,
+// prompt yang masih nunggu input (punya promptMid), pesan di grup.
+async function cleanFlow(env, chatId, fromId, userMsgId) {
+  if (!fromId) return
+  try {
+    const isPrivate = !chatId || String(chatId) === String(fromId) || Number(chatId) > 0
+    if (!isPrivate) return
+  } catch (e) {}
+  if (userMsgId) { try { await tgDeleteMessage(env, chatId, userMsgId) } catch (e) {} }
+  try {
+    const prev = await readJSON(env, 'flowMsg_' + fromId, null)
+    if (prev && prev !== userMsgId) { try { await tgDeleteMessage(env, chatId, prev) } catch (e) {} }
+  } catch (e) {}
 }
 
 async function showProductList(env, chatId, fromId, fromName, page = 1) {
@@ -606,7 +639,7 @@ async function showVariants(env, chatId, kategoriId, fromId) {
   await sendTextCard(env, chatId, view.caption, view.keyboard, fromId, view.parseMode)
 }
 
-async function showStockInfo(env, chatId) {
+async function showStockInfo(env, chatId, fromId) {
   const produk = await readJSON(env, 'Produk', [])
   const withStock = produk
   if (withStock.length === 0) {
@@ -628,13 +661,13 @@ async function showStockInfo(env, chatId) {
   if (skippedStock > 0) cap += '┊ … +' + skippedStock + ' varian lainnya\n'
   cap += '╰──────────────────\n\n👉 Ketik nomor produk untuk membeli'
   const keyboard = { inline_keyboard: [[{ text: '↻ Refresh', callback_data: 'refreshh' }]] }
-  await sendTextCard(env, chatId, cap, keyboard)
+  await sendTextCard(env, chatId, cap, keyboard, fromId)
 }
 
 async function showRiwayat(env, chatId, fromId) {
   const text = 'RIWAYAT · pilih jenis\n━━━━━━━━━━━━━━━━━━\nLihat riwayat transaksi pembelian atau riwayat deposit saldo.'
   const keyboard = { inline_keyboard: [[{ text: '🧾 Transaksi', callback_data: 'riwayat_jenis_trx' }, { text: '💳 Deposit', callback_data: 'riwayat_jenis_dep' }]] }
-  await sendTextCard(env, chatId, text, keyboard)
+  await sendTextCard(env, chatId, text, keyboard, fromId)
 }
 
 function isDeposit(t) { return t.tipe === 'deposit' || t.produk === 'Deposit Saldo' }
@@ -646,13 +679,13 @@ async function showRiwayatJenis(env, chatId, fromId, jenis) {
   const kosong = jenis === 'dep' ? '📜 Belum ada riwayat deposit.' : '📜 Belum ada riwayat transaksi.'
   if (userTrx.length === 0) {
     const kb = { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'riwayat_menu' }]] }
-    await sendTextCard(env, chatId, kosong, kb)
+    await sendTextCard(env, chatId, kosong, kb, fromId)
     return
   }
   const PER_PAGE = 5
   const totalPages = Math.ceil(userTrx.length / PER_PAGE)
   const view = jenis === 'dep' ? buildRiwayatDepositView(userTrx, 1, totalPages) : buildRiwayatView(userTrx, 1, totalPages)
-  await sendTextCard(env, chatId, view.text, view.keyboard)
+  await sendTextCard(env, chatId, view.text, view.keyboard, fromId)
 }
 
 function payLabel(t) {
@@ -765,10 +798,10 @@ async function showProfil(env, chatId, fromId) {
   cap += '┊ 📅 Bergabung : ' + tglGabung + '\n'
   cap += '╰──────────────────\n'
   cap += '\n💡 Isi saldo lewat 💳 Deposit'
-  await sendTextCard(env, chatId, cap, null)
+  await sendTextCard(env, chatId, cap, null, fromId)
 }
 
-async function showCaraOrder(env, chatId) {
+async function showCaraOrder(env, chatId, fromId) {
   if (caraOrderText && caraOrderText.trim().length > 0) {
     await tgSendMessage(env, chatId, caraOrderText, null, 'Markdown')
     return
@@ -785,7 +818,7 @@ async function showCaraOrder(env, chatId) {
   pesan += '• Transfer tepat sesuai nominal\n'
   pesan += '• Transaksi kadaluarsa 5 menit\n'
   pesan += '• Hubungi admin jika ada kendala'
-  await tgSendMessage(env, chatId, pesan, null, 'Markdown')
+  await sendTextCard(env, chatId, pesan, null, fromId)
 }
 
 async function handleDepositState(env, msg, state) {

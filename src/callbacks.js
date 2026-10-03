@@ -433,6 +433,29 @@ async function handleCallbackQuery(env, cq) {
     return
   }
 
+  if (data.startsWith('refresh_var_')) {
+    const katId = parseInt(data.replace('refresh_var_', ''))
+    const kategori = await readJSON(env, 'Kategori', [])
+    const kat = kategori.find(k => k.id === katId)
+    if (!kat) { await tgAnswerCallbackQuery(env, cqId, 'Produk tidak ditemukan.', true); return }
+    await tgAnswerCallbackQuery(env, cqId, '🔄 Detail diperbarui', false)
+    const produk = await readJSON(env, 'Produk', [])
+    const variants = produk.filter(p => p.category === kat.produkId)
+    const fsAll = await readJSON(env, 'FlashSale', {})
+    const nowFs = Date.now()
+    const fsMap = {}
+    for (const vv of variants) {
+      const f = fsAll[String(vv.id)]
+      if (f && (!f.expiresAt || nowFs < Number(f.expiresAt))) fsMap[String(vv.id)] = f
+    }
+    const trxAll = await readJSON(env, 'Trx', [])
+    const sold = trxAll.filter(t => t.status === 'Lunas' && String(t.produk) === String(kat.produkName)).reduce((a, t) => a + (Number(t.jumlah) || 0), 0)
+    const { buildVariantView } = await import('./messages.js')
+    const view = buildVariantView(kat, variants, fsMap, sold)
+    await editCard(env, cq, view.caption, view.keyboard, view.parseMode || 'HTML')
+    return
+  }
+
   if (data.startsWith('dpi_')) {
     const variantId = parseInt(data.replace('dpi_', ''))
     const produk = await readJSON(env, 'Produk', [])

@@ -547,6 +547,7 @@ function buildVariantView(kat, variants, fsMap = {}, sold = 0) {
   for (const v of variants) {
     rows.push([{ text: v.nameproduct, callback_data: 'dpi_' + v.id }])
   }
+  rows.push([{ text: '↻ Refresh', callback_data: 'refresh_var_' + kat.id }])
   rows.push([{ text: '🔙 Kembali', callback_data: 'back_to_list' }])
   return { caption: cap, keyboard: { inline_keyboard: rows }, parseMode: 'HTML' }
 }

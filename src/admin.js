@@ -486,12 +486,15 @@ export async function recordStokBaru(env, variantId, count) {
   } catch (e) {}
 }
 
-async function buildStokBaruBroadcast(env) {
+// Broadcast HANYA entri yang baru di-add (notifyPending) — real-time per produk.
+// Arsip lama (sudah pernah di-notif) tidak ikut kekirim lagi.
+async function buildStokBaruBroadcast(env, onlyPending = true) {
   const list = await readJSON(env, 'StokBaru', [])
-  if (!list || list.length === 0) return null
+  const items = onlyPending ? (list || []).filter(e => e.notifyPending) : (list || [])
+  if (!items || items.length === 0) return null
   const groups = {}
   const order = []
-  for (const e of list) {
+  for (const e of items) {
     const key = e.product || '-'
     if (!groups[key]) { groups[key] = []; order.push(key) }
     groups[key].push(e)
@@ -2645,9 +2648,13 @@ export async function handleAdminCallback(env, cq) {
         bcSent++; await sleep(50)
       } catch (e) {}
     }
-    await deleteKey(env, 'StokBaru')
+    // Reset flag pending saja — arsip tetap tersimpan untuk referensi
+    try {
+      const curList = await readJSON(env, 'StokBaru', [])
+      await writeJSON(env, 'StokBaru', (curList || []).map(e => ({ ...e, notifyPending: false })))
+    } catch (e) {}
     await tgEditMessageText(env, chatId, messageId,
-      '✅ Broadcast Stok Terbaru terkirim ke ' + bcSent + '/' + bcUsers.length + ' user.\nDaftar stok baru telah direset.',
+      '✅ Broadcast Stok Terbaru terkirim ke ' + bcSent + '/' + bcUsers.length + ' user.\nStatus notif direset (arsip tetap tersimpan).',
       { inline_keyboard: [[{ text: '🔙 Ke Panel', callback_data: 'adm_panel' }]] }, '')
     return
   }

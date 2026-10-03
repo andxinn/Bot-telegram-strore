@@ -149,26 +149,32 @@ function fsDiscountPercent(orig, sale) {
   return Math.round((orig - sale) / orig * 100)
 }
 
-// Build caption broadcast Flash Sale (menarik pembeli)
+// Build caption broadcast Flash Sale (format baru: header + quote + <pre>).
+// HTML: caption dikirim dgn parse_mode HTML (blockquote/pre didukung).
+function fsBcWaktu(tsMs) {
+  try {
+    const d = new Date(Number(tsMs) + 7 * 3600 * 1000)
+    const p2 = (n) => String(n).padStart(2, '0')
+    return p2(d.getUTCDate()) + '-' + p2(d.getUTCMonth() + 1) + '-' + d.getUTCFullYear() + ' ' + p2(d.getUTCHours()) + ':' + p2(d.getUTCMinutes()) + ' WIB'
+  } catch (e) { return '-' }
+}
 async function fsBuildBcCaption(env, fs, variantName, kategoriName) {
   const pct = fsDiscountPercent(fs.originalPrice, fs.salePrice)
   const hemat = fs.originalPrice - fs.salePrice
-  const endsWib = fsFormatEndsAtWIB(fs.expiresAt)
+  const endsWib = fsBcWaktu(fs.expiresAt)
   const remaining = fsFormatRemaining(fs.expiresAt - Date.now())
-  let cap = '🔥 *FLASH SALE PROMO* 🔥\n'
-  cap += '╭──────────────────────╮\n'
-  cap += '┊ 📦 *' + (variantName || 'Produk') + '*\n'
-  if (kategoriName) cap += '┊ _' + kategoriName + '_\n'
-  cap += '├──────────────────────\n'
-  cap += '┊ Harga Normal : ' + ParseIdr(fs.originalPrice) + '\n'
-  cap += '┊ Harga SALE   : 🔥 *' + ParseIdr(fs.salePrice) + '*\n'
-  cap += '┊ Hemat        : *' + pct + '%* (' + ParseIdr(hemat) + ')\n'
-  cap += '├──────────────────────\n'
-  cap += '┊ Berakhir     : ⏰ ' + endsWib + '\n'
-  cap += '┊ Sisa         : ⏳ *' + remaining + '*\n'
-  cap += '╰──────────────────────\n'
-  cap += '🛒 _Buruan checkout sebelum kehabisan!_'
-  return cap
+  const p = (await readJSON(env, 'Produk', [])).find(pr => String(pr.id) === String(fs.variantId))
+  const stokN = p && p.stok ? p.stok.length : 0
+  const S = '━━━━━━━━━━━━━━━━━━━━'
+  const judul = [kategoriName, variantName].filter(v => v && v !== '-').join(' - ') || '-'
+  const rows =
+    '» Normal : ' + ParseIdr(fs.originalPrice) + '\n' +
+    '» Sale   : ' + ParseIdr(fs.salePrice) + '\n' +
+    '» Hemat  : ' + pct + '% (' + ParseIdr(hemat) + ')\n' +
+    '» Stok   : ' + stokN + 'x\n' +
+    '» Sisa   : ' + remaining + '\n' +
+    '» Akhir  : ' + endsWib
+  return { text: S + '\n𝗙𝗟𝗔𝗦𝗛 𝗦𝗔𝗟𝗘\n' + S + '\n<blockquote>' + escHtml(judul) + '</blockquote>\n<pre>' + escHtml(rows) + '</pre>\n' + S, parseMode: 'HTML' }
 }
 
 // Build caption broadcast Update Harga (turun/naik)
@@ -193,23 +199,33 @@ function fsBuildBcPriceCaption(variantName, kategoriName, oldPrice, newPrice) {
   return cap
 }
 
-// Broadcast helper: kirim ke semua user dengan optional banner base64
+// Broadcast helper: kirim ke semua user dengan optional banner base64.
+// Chunked: max 30/dtk Telegram → jeda tiap 20 user + hormati 429.
+// caption: { text, parseMode } (format baru) atau string Markdown (legacy).
 async function fsBroadcastToAllUsers(env, bannerB64, caption, buyBtn) {
   const users = await readJSON(env, 'UserList', [])
   let sent = 0, failed = 0
   const kb = buyBtn ? { inline_keyboard: [[buyBtn]] } : undefined
   const { tgSendPhotoBase64: sendPhoto, tgSendMessage: sendMsg } = await import('./telegram.js')
+  const capText = (caption && typeof caption === 'object') ? caption.text : caption
+  const capMode = (caption && typeof caption === 'object') ? (caption.parseMode || 'HTML') : 'Markdown'
   for (let i = 0; i < users.length; i++) {
     const uid = users[i].chatId
     try {
-      if (bannerB64) {
-        await sendPhoto(env, uid, bannerB64, caption, kb, 'Markdown')
-      } else {
-        await sendMsg(env, uid, caption, kb, 'Markdown')
-      }
-      sent++
+      const r = bannerB64
+        ? await sendPhoto(env, uid, bannerB64, capText, kb, capMode)
+        : await sendMsg(env, uid, capText, kb, capMode)
+      // Hormati rate-limit 429: mundur sesuai retry_after lalu lanjut sekali
+      if (r && r.error_code === 429 && r.parameters && r.parameters.retry_after) {
+        await new Promise(res => setTimeout(res, (Number(r.parameters.retry_after) + 1) * 1000))
+        const r2 = bannerB64
+          ? await sendPhoto(env, uid, bannerB64, capText, kb, capMode)
+          : await sendMsg(env, uid, capText, kb, capMode)
+        if (r2 && r2.ok) sent++; else failed++
+      } else if (r && r.ok) sent++
+      else failed++
     } catch (e) { failed++ }
-    if ((i + 1) % 20 === 0) await new Promise(r => setTimeout(r, 500))
+    if ((i + 1) % 20 === 0) await new Promise(r => setTimeout(r, 800))
   }
   return { sent, failed, total: users.length }
 }
@@ -2665,14 +2681,21 @@ export async function handleAdminCallback(env, cq) {
     const { flashSaleSetActive } = await import('./user.js')
     await flashSaleSetActive(env, st.variantId, fs)
     await deleteKey(env, 'adminState_' + fromId)
-    // Prompt broadcast
-    let cap = '✅ *FLASH SALE AKTIF!*\n\n'
-    cap += '📦 ' + p.nameproduct + '\n'
-    cap += '💰 Rp ' + Number(fs.originalPrice).toLocaleString('id-ID') + ' → *Rp ' + Number(fs.salePrice).toLocaleString('id-ID') + '*\n'
-    cap += '🎯 Hemat ' + fs.discountPercent + '%\n'
-    cap += '⏰ Sisa: ' + fs.durationLabel + '\n'
-    cap += '⏰ Berakhir: ' + fsFormatEndsAtWIB(fs.expiresAt) + '\n\n'
-    cap += '*Broadcast ke semua user sekarang?*'
+    // Prompt broadcast (format baru: header + quote + <pre>)
+    const kategoriList2 = await readJSON(env, 'Kategori', [])
+    const kat2 = kategoriList2.find(k => String(k.produkId) === String(p.category))
+    const S2 = '━━━━━━━━━━━━━━━━━━━━'
+    const judul2 = (kat2 ? kat2.produkName + ' - ' : '') + p.nameproduct
+    const rows2 =
+      '» Normal : ' + ParseIdr(fs.originalPrice) + '\n' +
+      '» Sale   : ' + ParseIdr(fs.salePrice) + '\n' +
+      '» Hemat  : ' + fs.discountPercent + '%\n' +
+      '» Durasi : ' + fs.durationLabel + '\n' +
+      '» Akhir  : ' + fsFormatEndsAtWIB(fs.expiresAt) + '\n' +
+      '» Status : Belum broadcast'
+    let cap = S2 + '\n𝗙𝗟𝗔𝗦𝗛 𝗦𝗔𝗟𝗘 𝗔𝗞𝗧𝗜𝗙\n' + S2 +
+      '\n<blockquote>' + escHtml(judul2) + '</blockquote>\n<pre>' + escHtml(rows2) + '</pre>\n' + S2 +
+      '\n\nBroadcast ke semua user sekarang?'
     const kb = {
       inline_keyboard: [
         [{ text: '📢 Ya, Broadcast Sekarang', callback_data: 'adm_fs_bc_ok_' + st.variantId }],
@@ -2680,7 +2703,7 @@ export async function handleAdminCallback(env, cq) {
          { text: '📋 Daftar Aktif', callback_data: 'adm_fs_list' }]
       ]
     }
-    await tgEditMessageText(env, chatId, messageId, cap, kb, 'Markdown')
+    await tgEditMessageText(env, chatId, messageId, cap, kb, 'HTML')
     return
   }
 

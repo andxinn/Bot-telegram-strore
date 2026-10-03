@@ -113,6 +113,14 @@ async function handleMessage(env, msg) {
   if (await isBanned(env, fromId)) return
 
   if (text.startsWith('/') && text.toLowerCase() !== '/batal') {
+    // /start = reset total: selalu lolos, bersihkan state basi sisa sesi sebelumnya
+    if (text.toLowerCase() === '/start' || text.toLowerCase().startsWith('/start ')) {
+      for (const k of ['adminState_', 'manageState_', 'depositState_', 'ticketState_', 'orderState_', 'cekTrxState_']) {
+        await deleteKey(env, k + fromId)
+      }
+      await handleCommand(env, msg)
+      return
+    }
     // Jangan jalankan command saat user sedang input: teks berikutnya nyasar ke state basi
     const busyState = (await existsKey(env, 'adminState_' + fromId)) ||
       (await existsKey(env, 'manageState_' + fromId)) ||
@@ -494,7 +502,12 @@ function buildVariantView(kat, variants, fsMap = {}, sold = 0) {
     const st = v.stok ? v.stok.length : 0
     const fs = fsMap[String(v.id)]
     const effPrice = fs ? Number(fs.salePrice) : (v.price || 0)
-    cap += '✱ ' + esc(v.nameproduct) + ': Rp. ' + effPrice.toLocaleString('id-ID') + ' | Stok: <b>' + st + '</b>\n'
+    if (fs) {
+      const pct = (v.price || 0) > 0 ? Math.round(((v.price || 0) - effPrice) / (v.price || 1) * 100) : 0
+      cap += '✱ ' + esc(v.nameproduct) + ': <s>Rp. ' + Number(v.price || 0).toLocaleString('id-ID') + '</s> → <b>Rp. ' + effPrice.toLocaleString('id-ID') + '</b> 🔥 SALE -' + pct + '% | Stok: <b>' + st + '</b>\n'
+    } else {
+      cap += '✱ ' + esc(v.nameproduct) + ': Rp. ' + effPrice.toLocaleString('id-ID') + ' | Stok: <b>' + st + '</b>\n'
+    }
   })
   cap += '\n<i>Refresh at ' + getTanggalJam().jam + ' WIB</i>'
   const rows = []

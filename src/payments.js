@@ -423,7 +423,7 @@ async function processPaymentSuccess(env, session, matchData) {
   + 'ID Transaksi:\n'
   + '`' + session.id + '`\n\n'
   + 'Terimakasih Sudah Membeli Di Toko Kami\n'
-  + '🔗 Akun dikirim di file .txt di atas'
+  + '🔗 Akun dikirim di file .txt di bawah 👇'
   let fileContent = 'INFO ORDER\n'
   fileContent += 'Nomor: ' + session.id + '\n'
   fileContent += 'Tanggal: ' + formatWIB(new Date().toISOString()) + '\n'
@@ -435,12 +435,14 @@ async function processPaymentSuccess(env, session, matchData) {
   fileContent += ambilStok.map(s => s.info || (typeof s === 'string' ? s : JSON.stringify(s))).map((item, i) => (i + 1) + '. ' + item).join('\n')
   fileContent += '\n\nSYARAT & KETENTUAN:\n' + snkText
   fileContent += '\n\nTerima kasih sudah berbelanja!\n' + (NamaBot || '')
+  // 1) kirim caption dulu, 2) file .txt dikirim setelahnya (tombol menu melekat di file)
+  await tgSendMessage(env, details.userId, suc, null, 'Markdown')
   const cfg = await readJSON(env, 'BotConfig', {})
   if (cfg.successSticker) {
-    await tgSendDocument(env, details.userId, fileContent, session.id + '.txt', suc)
+    await tgSendDocument(env, details.userId, fileContent, session.id + '.txt', '')
     await tgSendSticker(env, details.userId, cfg.successSticker, getMainMenuKeyboard())
   } else {
-    await tgSendDocument(env, details.userId, fileContent, session.id + '.txt', suc, getMainMenuKeyboard())
+    await tgSendDocument(env, details.userId, fileContent, session.id + '.txt', '', getMainMenuKeyboard())
   }
   if (InvoiceLogger) {
     // Dihapus: duplikat. Notif sukses tunggal dikirim via sendTxLog di bawah

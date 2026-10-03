@@ -731,13 +731,15 @@ async function handleCallbackQuery(env, cq) {
       + 'ID Transaksi:\n'
       + '`' + trxId + '`\n\n'
       + 'Terimakasih Sudah Membeli Di Toko Kami\n'
-      + '🔗 Akun dikirim di file .txt di atas'
+      + '🔗 Akun dikirim di file .txt di bawah 👇'
+      // 1) kirim caption dulu, 2) file .txt dikirim setelahnya (tombol menu melekat di file)
+      await tgSendMessage(env, chatId, sucCapS, null, 'Markdown')
       const cfg = await readJSON(env, 'BotConfig', {})
       if (cfg.successSticker) {
-        await tgSendDocument(env, chatId, sucFileS, trxId + '.txt', sucCapS)
+        await tgSendDocument(env, chatId, sucFileS, trxId + '.txt', '')
         await tgSendSticker(env, chatId, cfg.successSticker, getMainMenuKeyboard())
       } else {
-        await tgSendDocument(env, chatId, sucFileS, trxId + '.txt', sucCapS, getMainMenuKeyboard())
+        await tgSendDocument(env, chatId, sucFileS, trxId + '.txt', '', getMainMenuKeyboard())
       }
       if (InvoiceLogger) {
         // Dihapus: duplikat. Notif sukses tunggal via sendTxLog di bawah.

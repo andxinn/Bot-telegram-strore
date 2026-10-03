@@ -30,10 +30,11 @@ function getExpiredDateWIB(days) {
 // --- Format tampilan expired yang informatif ---
 function formatExpiredDisplay(expiredAt, days) {
   if (!expiredAt) return 'Tidak ada expired ♾️'
-  // Format tanggal: 23 Jul 2026
-  const d = new Date(expiredAt + 'T00:00:00+07:00')
+  // expiredAt disimpan sebagai tanggal kalender WIB (YYYY-MM-DD) — tampilkan polos
+  // tanpa konversi zona agar tidak mundur 1 hari di worker UTC
+  const d = new Date(expiredAt + 'T00:00:00Z')
   const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des']
-  const tgl = d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear()
+  const tgl = d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + d.getUTCFullYear()
   return tgl + (days ? ' (' + days + ' hari)' : '')
 }
 
@@ -908,6 +909,28 @@ export async function handleAdminState(env, msg, state) {
     return
   }
 
+// ─── STOK YATIM: eksekusi kembalikan ke varian (state handler) ───
+  if (state.action === 'yatim_restore') {
+    const vid = text.trim()
+    const produk = await readJSON(env, 'Produk', [])
+    const p = produk.find(pr => String(pr.id) === String(vid))
+    if (!p) { await tgSendMessage(env, chatId, '⚠️ ID varian tidak ditemukan. Cek di 👁 Lihat Stok.'); return }
+    let yatim = []
+    try { yatim = await readJSON(env, 'StokYatim', []) } catch (e) {}
+    const y = yatim[state.yatimIdx]
+    if (!y || !y.items || y.items.length === 0) { await deleteKey(env, 'adminState_' + fromId); await tgSendMessage(env, chatId, '⚠️ Data sudah kosong.'); return }
+    p.stok = (y.items || []).concat(p.stok || [])
+    await writeJSON(env, 'Produk', produk)
+    yatim.splice(state.yatimIdx, 1)
+    await writeJSON(env, 'StokYatim', yatim)
+    await deleteKey(env, 'adminState_' + fromId)
+    await tgSendMessage(env, chatId,
+      '✅ *' + y.items.length + ' item* dikembalikan ke *' + p.nameproduct + '* (stok sekarang: ' + p.stok.length + ')',
+      adminMainPanel(), 'Markdown'
+    )
+    return
+  }
+
   if (state.action === 'editharga') {
     const harga = parseInt(text.replace(/[^0-9]/g, ''))
     if (isNaN(harga) || harga <= 0) {
@@ -1105,6 +1128,12 @@ export async function handleAdminState(env, msg, state) {
 
   if (state.action === 'addkat_nama') {
     if (text.length < 2) { await tgSendMessage(env, chatId, '⚠️ Nama terlalu pendek. Minimal 2 huruf.'); return }
+    // Tolak nama kategori duplikat (case-insensitive)
+    const kategori = await readJSON(env, 'Kategori', [])
+    if (kategori.some(k => (k.produkName || '').toLowerCase().trim() === text.toLowerCase().trim())) {
+      await tgSendMessage(env, chatId, '⚠️ Kategori *' + text + '* sudah ada. Pakai nama lain.', null, 'Markdown')
+      return
+    }
     const newState = { action: 'addkat_desc', namaKat: text }
     await writeJSON(env, 'adminState_' + fromId, newState)
     await tgSendMessage(env, chatId,
@@ -1124,6 +1153,14 @@ export async function handleAdminState(env, msg, state) {
   // ── ADD VARIAN: step nama ──
   if (state.action === 'addvarian_nama') {
     if (text.length < 1) { await tgSendMessage(env, chatId, '⚠️ Nama varian tidak boleh kosong.'); return }
+    // Tolak nama varian duplikat dalam kategori yang sama (case-insensitive)
+    const produk = await readJSON(env, 'Produk', [])
+    const kategori = await readJSON(env, 'Kategori', [])
+    const kat = kategori.find(k => String(k.id) === String(state.katId))
+    if (kat && produk.some(p => p.category === kat.produkId && (p.nameproduct || '').toLowerCase().trim() === text.toLowerCase().trim())) {
+      await tgSendMessage(env, chatId, '⚠️ Varian *' + text + '* sudah ada di kategori ini. Pakai nama lain.', null, 'Markdown')
+      return
+    }
     const newState = { action: 'addvarian_harga', katId: state.katId, varianNama: text }
     await writeJSON(env, 'adminState_' + fromId, newState)
     await tgSendMessage(env, chatId,
@@ -2300,10 +2337,54 @@ export async function handleAdminCallback(env, cq) {
       txt += icon + ' [' + p.id + '] ' + p.nameproduct + ': *' + count + '*\n'
     }
     txt += '\n📦 Total semua stok: *' + total + '*'
+    // Gudang darurat: stok reserve yang produknya dihapus admin (bug-5 fix)
+    let yatimKb = null
+    try {
+      const yatim = await readJSON(env, 'StokYatim', [])
+      if (yatim && yatim.length > 0) {
+        const yatimCount = yatim.reduce((n, y) => n + (y.items ? y.items.length : 0), 0)
+        txt += '\n\n📦 *Stok diamankan:* ' + yatimCount + ' item (' + yatim.length + ' trx) — produk dihapus saat pembayaran lunas'
+        yatimKb = { inline_keyboard: [
+          [{ text: '📦 Lihat Stok Diamankan', callback_data: 'adm_yatim_list' }],
+          [{ text: '🔙 Kembali', callback_data: 'adm_panel' }]
+        ] }
+      }
+    } catch (e) {}
     await tgEditMessageText(env, chatId, messageId, txt,
-      { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_panel' }]] },
+      yatimKb || { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_panel' }]] },
       'Markdown'
     )
+    return
+  }
+
+  // ─── STOK YATIM: daftar + kembalikan ke varian lain ───
+  if (data === 'adm_yatim_list') {
+    let yatim = []
+    try { yatim = await readJSON(env, 'StokYatim', []) } catch (e) {}
+    if (!yatim || yatim.length === 0) {
+      await tgAnswerCallbackQuery(env, cqId, 'Tidak ada stok diamankan', true)
+      return
+    }
+    let txt = '*📦 Stok Diamankan (' + yatim.length + ' trx)*\n\n'
+    const rows = []
+    yatim.slice(0, 10).forEach((y, i) => {
+      txt += (i + 1) + '. ' + (y.varian || '-') + ' — *' + (y.items ? y.items.length : 0) + ' item* (trx ' + (y.trx || '-') + ')\n'
+      rows.push([{ text: '↩️ Kembalikan #' + (i + 1) + ' ke varian...', callback_data: 'adm_yatim_pick_' + i }])
+    })
+    rows.push([{ text: '🔙 Kembali', callback_data: 'adm_panel' }])
+    await tgEditMessageText(env, chatId, messageId, txt, { inline_keyboard: rows }, 'Markdown')
+    return
+  }
+
+  // ─── STOK YATIM: pilih varian tujuan ───
+  if (data.startsWith('adm_yatim_pick_')) {
+    const idx = parseInt(data.replace('adm_yatim_pick_', ''))
+    let yatim = []
+    try { yatim = await readJSON(env, 'StokYatim', []) } catch (e) {}
+    if (isNaN(idx) || !yatim[idx]) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Data tidak ada', true); return }
+    await writeJSON(env, 'adminState_' + fromId, { action: 'yatim_restore', yatimIdx: idx })
+    let txt = '📦 Kembalikan *' + (yatim[idx].items ? yatim[idx].items.length : 0) + ' item* (' + (yatim[idx].varian || '-') + ') ke varian mana?\n\nKetik *ID varian* tujuan (lihat di 👁 Lihat Stok).\n\n_Ketik /batal jika tidak jadi._'
+    await tgEditMessageText(env, chatId, messageId, txt, null, 'Markdown')
     return
   }
 
@@ -2478,6 +2559,13 @@ export async function handleAdminCallback(env, cq) {
       }
     }
     if (fsChanged) await writeJSON(env, 'FlashSale', fsMap)
+
+    // Cleanup StokBaru (arsip broadcast) — varian yang dihapus jangan tampil lagi
+    try {
+      const stokBaru = await readJSON(env, 'StokBaru', [])
+      const sisaBaru = stokBaru.filter(e => !deletedVids.includes(String(e.id)))
+      if (sisaBaru.length !== stokBaru.length) await writeJSON(env, 'StokBaru', sisaBaru)
+    } catch (e) {}
 
     // Cleanup PriceChangeLogs
     for (const vid of deletedVids) {

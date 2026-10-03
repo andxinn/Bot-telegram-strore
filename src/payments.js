@@ -298,11 +298,22 @@ async function processPaymentSuccess(env, session, matchData) {
   if (!p) {
     const { addSaldo, cekSaldo } = await import('./user.js')
     const refundAmt = Number(details.total_amount) || 0
+    // Kembalikan stok reserve ke gudang darurat (StokYatim) agar tidak hilang tanpa tercatat
+    if (details.reserved && Array.isArray(details.reserved) && details.reserved.length > 0) {
+      try {
+        const yatim = await readJSON(env, 'StokYatim', [])
+        yatim.push({ variantId: details.id, varian: details.produk_nama || '-', items: details.reserved, trx: session.id, tanggal: new Date().toISOString(), sebab: 'Produk dihapus admin saat pembayaran lunas' })
+        await writeJSON(env, 'StokYatim', yatim)
+      } catch (e) {}
+    }
     const newBal = await addSaldo(env, details.userId, refundAmt)
     let msg = '*⚠️ TRANSAKSI GAGAL (PRODUK HILANG)*\n\n'
     msg += 'Pembayaran Anda berhasil, namun produk sudah dihapus dari toko.\n\n'
     msg += '💵 *' + ParseIdr(refundAmt) + ' otomatis dikembalikan ke SALDO*\n'
     msg += 'Saldo baru: ' + ParseIdr(newBal || 0)
+    if (details.reserved && Array.isArray(details.reserved) && details.reserved.length > 0) {
+      msg += '\n\n📦 Stok pesanan Anda (' + details.reserved.length + ' item) diamankan admin — hubungi admin untuk pengiriman manual.'
+    }
     await tgSendMessage(env, details.userId, msg, getMainMenuKeyboard(), 'Markdown')
     if (InvoiceLogger) {
       await tgSendMessage(env, InvoiceLogger, escapeMarkdown('*\u26a0 PRODUK HILANG saat pembayaran sukses!*\nUser: ' + details.nama + '\nTrx: ' + session.id + '\nAmount: ' + ParseIdr(details.total_amount) + '\nRefund otomatis ke saldo.'))

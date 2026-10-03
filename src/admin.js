@@ -980,6 +980,15 @@ export async function handleAdminState(env, msg, state) {
     const namaLama = p.nameproduct
     p.nameproduct = text
     await writeJSON(env, 'Produk', produk)
+    // Sync nama ke FlashSale aktif (snapshot dibuat sekali saat FS dibuat)
+    try {
+      const { flashSaleGetActive, flashSaleSetActive } = await import('./user.js')
+      const fsCur = await flashSaleGetActive(env, state.variantId)
+      if (fsCur) {
+        fsCur.variantName = text
+        await flashSaleSetActive(env, state.variantId, fsCur)
+      }
+    } catch (e) { /* FS tidak aktif — abaikan */ }
     await deleteKey(env, 'adminState_' + fromId)
     await tgSendMessage(env, chatId,
       '✅ Nama varian diperbarui\nSebelum: *' + namaLama + '*\nSekarang: *' + text + '*',
@@ -1042,9 +1051,14 @@ export async function handleAdminState(env, msg, state) {
     const p = produk.find(pr => String(pr.id) === String(state.variantId))
     if (!p) { await deleteKey(env, 'adminState_' + fromId); return }
     const isAll = text.toLowerCase() === 'semua' || text.toLowerCase() === 'all'
-    const jumlah = isAll ? (p.stok ? p.stok.length : 0) : parseInt(text)
-    if (!isAll && isNaN(jumlah)) {
-      await tgSendMessage(env, chatId, '⚠️ Input tidak valid. Ketik angka atau *semua*.', null, 'Markdown')
+    const stokLen = p.stok ? p.stok.length : 0
+    const jumlah = isAll ? stokLen : parseInt(text)
+    if (!isAll && (isNaN(jumlah) || jumlah <= 0)) {
+      await tgSendMessage(env, chatId, '⚠️ Input tidak valid. Ketik angka 1-' + stokLen + ' atau *semua*.', null, 'Markdown')
+      return
+    }
+    if (jumlah > stokLen) {
+      await tgSendMessage(env, chatId, '⚠️ Stok hanya tersisa *' + stokLen + '*. Ketik angka 1-' + stokLen + ' atau *semua*.', null, 'Markdown')
       return
     }
     const newState = { ...state, action: 'delstock_konfirmasi', jumlah }
@@ -2119,10 +2133,12 @@ export async function handleAdminCallback(env, cq) {
 
   if (data === 'adm_konfirmasi_delstock') {
     const state = await readJSON(env, 'adminState_' + fromId, null)
-    if (!state) return
+    if (!state || state.action !== 'delstock_konfirmasi') return
     const p = produk.find(pr => String(pr.id) === String(state.variantId))
-    if (!p) return
+    if (!p) { await deleteKey(env, 'adminState_' + fromId); return }
     const jumlah = state.jumlah
+    const stokLen = p.stok ? p.stok.length : 0
+    if (!Number.isInteger(jumlah) || jumlah <= 0 || jumlah > stokLen) { await deleteKey(env, 'adminState_' + fromId); return }
     const stokKeluar = await readJSON(env, 'StokKeluar', [])
     const dropped = (p.stok || []).slice(0, jumlah)
     p.stok = (p.stok || []).slice(jumlah)

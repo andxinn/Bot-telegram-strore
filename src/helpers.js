@@ -132,8 +132,24 @@ function generateRandomDonationMessage() {
   return shuffled.slice(0, 5).join(' ')
 }
 
+// Header sans-serif bold kapital (Mathematical Alphanumeric Symbols, U+1D5D4+A).
+// Full kapital saja — huruf kecil blok ini pecah di sebagian HP.
+function sansBold(s) {
+  const base = 0x1D5D4
+  let out = ''
+  for (const c of String(s || '')) {
+    const n = c.charCodeAt(0)
+    out += (n >= 65 && n <= 90) ? String.fromCodePoint(base + n - 65) : c
+  }
+  return out
+}
+
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
 function boxFormat(title, lines) {
-  let text = '\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2727\n'
+  let text = '\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2727\n'
   text += '\u250a ' + title + '\n'
   text += '\u250a\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n'
   for (const line of lines) {
@@ -183,6 +199,6 @@ async function generateUniqueOrderId(env, namaBot, tries = 5) {
 export {
   escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam,
   chunkArray, sleep, toCRC16, generateTrxId, generateOrderId, generateKodeUnik, expiredTime, parseExpiredWIB,
-  generateRandomPhone, generateRandomEmail, generateRandomDonationMessage, boxFormat, loadingBar,
+  generateRandomPhone, generateRandomEmail, generateRandomDonationMessage, boxFormat, loadingBar, sansBold, escHtml,
   generateTicketId, orderIdUnique, generateUniqueOrderId
 }

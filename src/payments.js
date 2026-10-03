@@ -1,7 +1,7 @@
 import { InvoiceLogger, SimulatePayment, NamaBot } from './config.js'
 import { readJSON, writeJSON, writeText, deleteKey, existsKey } from './kv.js'
 import { tgSendMessage, tgSendDocument, tgDeleteMessage, tgEditMessageCaption, tgSendSticker } from './telegram.js'
-import { escapeMarkdown, ParseIdr, formatWIB, getDate, getTanggalJam, generateTrxId, parseExpiredWIB } from './helpers.js'
+import { escapeMarkdown, ParseIdr, formatWIB, getDate, getTanggalJam, generateTrxId, parseExpiredWIB, sansBold, escHtml } from './helpers.js'
 import { pakasirDetail } from './pakasir.js'
 import { duitkuStatus } from './duitku.js'
 import { getMainMenuKeyboard } from './keyboard.js'
@@ -236,7 +236,12 @@ async function processPaymentSuccess(env, session, matchData) {
     await addSaldo(env, details.userId, details.amount)
     const saldo = await cekSaldo(env, details.userId)
     try { if (details.key) await tgDeleteMessage(env, details.userId, details.key) } catch (e) {}
-    await tgSendMessage(env, details.userId, escapeMarkdown('*\ud83e\uddfe DEPOSIT BERHASIL \u2705*\n\nJumlah: ' + ParseIdr(details.amount) + '\nSaldo: ' + ParseIdr(saldo) + '\n\nID: ' + session.id), getMainMenuKeyboard())
+    const wkt = getTanggalJam().tanggal + ' ' + getTanggalJam().jam
+    const depMsg = sansBold('TRANSAKSI ANDA SUKSES') + '\n'
+      + '<blockquote>Saldo ' + ParseIdr(details.amount) + ' masuk ke akun kamu</blockquote>\n'
+      + '<pre>\u00bb Jumlah : ' + ParseIdr(details.amount) + '\n\u00bb Saldo  : ' + ParseIdr(saldo) + '\n\u00bb Waktu  : ' + wkt + '</pre>\n'
+      + 'ID: <code>' + escHtml(session.id) + '</code>'
+      await tgSendMessage(env, details.userId, depMsg, getMainMenuKeyboard(), 'HTML')
     if (InvoiceLogger) {
       const tj = getTanggalJam()
       await tgSendMessage(env, InvoiceLogger, escapeMarkdown('*DEPOSIT BERHASIL \u2705*\n\nUser: ' + details.nama + '\nAmount: ' + ParseIdr(details.amount) + '\nTanggal: ' + tj.tanggal + ' ' + tj.jam))

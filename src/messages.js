@@ -1,7 +1,7 @@
 import { NamaBot, OwnerID, ChannelLog, InvoiceLogger, SimulatePayment, ButtonMenu, BannerFileId, bannerListB64, orderBotName, caraOrderText, leaderboardEnabled, leaderboardBanner, channelTicket } from './config.js'
 import { readJSON, writeJSON, readText, writeText, deleteKey, existsKey } from './kv.js'
 import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgSendDocument, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile, tgSetReaction, tgGetChat } from './telegram.js'
-import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getTanggalJam, sleep, generateTrxId, expiredTime, loadingBar, generateTicketId } from './helpers.js'
+import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getTanggalJam, sleep, generateTrxId, expiredTime, loadingBar, generateTicketId, sansBold } from './helpers.js'
 import { getUserList, getUser, addUser, addSaldo, cekSaldo, isOwner, getRole, isBanned } from './user.js'
 import { getMainMenuKeyboard, getProductNumberKeyboard } from './keyboard.js'
 import { handleCommand } from './commands.js'
@@ -771,7 +771,11 @@ async function handleDepositState(env, msg, state) {
       await addSaldo(env, chatId, amount)
       await deleteKey(env, 'depositState_' + fromId)
       const saldo = await cekSaldo(env, chatId)
-      await tgSendMessage(env, chatId, escapeMarkdown('╭───〔 ▤ DEPOSIT BERHASIL ✓ 〕──\n┊ *Jumlah :* ' + ParseIdr(amount) + '\n┊ *Saldo  :* ' + ParseIdr(saldo) + '\n╰──────────────────\n\n_(Simulasi - langsung sukses)_'), getMainMenuKeyboard())
+      const wktS = getTanggalJam().tanggal + ' ' + getTanggalJam().jam
+      const depMsgS = sansBold('TRANSAKSI ANDA SUKSES') + '\n'
+        + '<blockquote>Saldo ' + ParseIdr(amount) + ' masuk ke akun kamu</blockquote>\n'
+        + '<pre>\u00bb Jumlah : ' + ParseIdr(amount) + '\n\u00bb Saldo  : ' + ParseIdr(saldo) + '\n\u00bb Waktu  : ' + wktS + '</pre>'
+      await tgSendMessage(env, chatId, depMsgS, getMainMenuKeyboard(), 'HTML')
       return
     }
     const agD = await getActiveGateway(env)

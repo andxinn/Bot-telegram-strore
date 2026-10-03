@@ -242,6 +242,16 @@ async function processPaymentSuccess(env, session, matchData) {
       + '<pre>\u00bb Jumlah : ' + ParseIdr(details.amount) + '\n\u00bb Saldo  : ' + ParseIdr(saldo) + '\n\u00bb Waktu  : ' + wkt + '</pre>\n'
       + 'ID: <code>' + escHtml(session.id) + '</code>'
       await tgSendMessage(env, details.userId, depMsg, getMainMenuKeyboard(), 'HTML')
+    try {
+      const dtrx = await readJSON(env, 'Trx', [])
+      dtrx.push({
+        trxid: session.id, user_id: details.userId, tipe: 'deposit',
+        produk: 'Deposit Saldo', varian: '-', jumlah: 1,
+        total: details.amount, saldo: saldo, payment_method: 'QRIS',
+        tanggal: new Date().toISOString(), status: 'Lunas'
+      })
+      await writeJSON(env, 'Trx', dtrx)
+    } catch (e) {}
     if (InvoiceLogger) {
       const tj = getTanggalJam()
       await tgSendMessage(env, InvoiceLogger, escapeMarkdown('*DEPOSIT BERHASIL \u2705*\n\nUser: ' + details.nama + '\nAmount: ' + ParseIdr(details.amount) + '\nTanggal: ' + tj.tanggal + ' ' + tj.jam))

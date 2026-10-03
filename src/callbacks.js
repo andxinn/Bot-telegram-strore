@@ -1247,11 +1247,37 @@ async function handleCallbackQuery(env, cq) {
     return
   }
 
+  // ======= RIWAYAT: menu jenis + paginasi transaksi/deposit =======
+  if (data === 'riwayat_menu') {
+    const { showRiwayat } = await import('./messages.js')
+    await showRiwayat(env, chatId, fromId)
+    try { await tgAnswerCallbackQuery(env, cqId) } catch (e) {}
+    return
+  }
+  if (data === 'riwayat_jenis_trx' || data === 'riwayat_jenis_dep') {
+    const jenis = data === 'riwayat_jenis_dep' ? 'dep' : 'trx'
+    const { showRiwayatJenis } = await import('./messages.js')
+    await showRiwayatJenis(env, chatId, fromId, jenis)
+    try { await tgAnswerCallbackQuery(env, cqId) } catch (e) {}
+    return
+  }
+  if (data.startsWith('riwayatdep_page_')) {
+    const rwPage = parseInt(data.replace('riwayatdep_page_', ''))
+    const allTrx = await readJSON(env, 'Trx', [])
+    const myTrx = allTrx.filter(t => String(t.user_id) === String(fromId) && t.status === 'Lunas' && (t.tipe === 'deposit' || t.produk === 'Deposit Saldo'))
+    const PER_PAGE = 5
+    const totalPg = Math.ceil(myTrx.length / PER_PAGE)
+    if (rwPage < 1 || rwPage > totalPg) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Halaman tidak tersedia.', true); return }
+    const { buildRiwayatDepositView } = await import('./messages.js')
+    const view = buildRiwayatDepositView(myTrx, rwPage, totalPg)
+    await editCard(env, cq, view.text, view.keyboard, view.parseMode || 'Markdown')
+    return
+  }
   // ======= RIWAYAT PAGE =======
   if (data.startsWith('riwayat_page_')) {
     const rwPage = parseInt(data.replace('riwayat_page_', ''))
     const allTrx = await readJSON(env, 'Trx', [])
-    const myTrx = allTrx.filter(t => String(t.user_id) === String(fromId) && t.status === 'Lunas')
+    const myTrx = allTrx.filter(t => String(t.user_id) === String(fromId) && t.status === 'Lunas' && !(t.tipe === 'deposit' || t.produk === 'Deposit Saldo'))
     const PER_PAGE = 5
     const totalPg = Math.ceil(myTrx.length / PER_PAGE)
     if (rwPage < 1 || rwPage > totalPg) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Halaman tidak tersedia.', true); return }

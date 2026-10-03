@@ -632,16 +632,26 @@ async function showStockInfo(env, chatId) {
 }
 
 async function showRiwayat(env, chatId, fromId) {
+  const text = 'RIWAYAT · pilih jenis\n━━━━━━━━━━━━━━━━━━\nLihat riwayat transaksi pembelian atau riwayat deposit saldo.'
+  const keyboard = { inline_keyboard: [[{ text: '🧾 Transaksi', callback_data: 'riwayat_jenis_trx' }, { text: '💳 Deposit', callback_data: 'riwayat_jenis_dep' }]] }
+  await sendTextCard(env, chatId, text, keyboard)
+}
+
+function isDeposit(t) { return t.tipe === 'deposit' || t.produk === 'Deposit Saldo' }
+
+async function showRiwayatJenis(env, chatId, fromId, jenis) {
   const trx = await readJSON(env, 'Trx', [])
-  // Hanya transaksi sukses (Lunas) milik user sendiri
-  const userTrx = trx.filter(t => String(t.user_id) === String(fromId) && t.status === 'Lunas')
+  const mine = trx.filter(t => String(t.user_id) === String(fromId) && t.status === 'Lunas')
+  const userTrx = jenis === 'dep' ? mine.filter(isDeposit) : mine.filter(t => !isDeposit(t))
+  const kosong = jenis === 'dep' ? '📜 Belum ada riwayat deposit.' : '📜 Belum ada riwayat transaksi.'
   if (userTrx.length === 0) {
-    await tgSendMessage(env, chatId, '📜 Belum ada riwayat transaksi.')
+    const kb = { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'riwayat_menu' }]] }
+    await sendTextCard(env, chatId, kosong, kb)
     return
   }
   const PER_PAGE = 5
   const totalPages = Math.ceil(userTrx.length / PER_PAGE)
-  const view = buildRiwayatView(userTrx, 1, totalPages)
+  const view = jenis === 'dep' ? buildRiwayatDepositView(userTrx, 1, totalPages) : buildRiwayatView(userTrx, 1, totalPages)
   await sendTextCard(env, chatId, view.text, view.keyboard)
 }
 
@@ -687,6 +697,37 @@ function buildRiwayatView(userTrx, page, totalPages) {
   if (pg < totalPages) nav.push({ text: 'Lanjut ➡️', callback_data: 'riwayat_page_' + (pg + 1) })
   const rows = []
   if (nav.length) rows.push(nav)
+  rows.push([{ text: '🔙 Kembali', callback_data: 'riwayat_menu' }])
+  return { text: text, keyboard: { inline_keyboard: rows }, parseMode: 'Markdown' }
+}
+
+function buildRiwayatDepositView(userTrx, page, totalPages) {
+  const PER_PAGE = 5
+  const pg = Math.min(Math.max(1, page), totalPages)
+  const items = userTrx.slice().reverse()
+  const start = (pg - 1) * PER_PAGE
+  const slice = items.slice(start, start + PER_PAGE)
+  let text = 'RIWAYAT DEPOSIT · ' + userTrx.length + ' sukses · hal ' + pg + '/' + totalPages + '\n'
+  text += '━━━━━━━━━━━━━━━━━━\n'
+  slice.forEach((t, i) => {
+    const num = start + i + 1
+    const id = (t.trxid || '-').replace(/[`_*\[\]]/g, '')
+    const rp = 'Rp ' + Number(t.total || 0).toLocaleString('id-ID')
+    const rpSaldo = 'Rp ' + Number(t.saldo || 0).toLocaleString('id-ID')
+    if (i > 0) text += '──────────────────\n'
+    text += '`' + num + '. ' + id + '`\n'
+    text += '    Jumlah masuk: ' + rp + '\n'
+    text += '    Saldo setelah: ' + rpSaldo + '\n'
+    text += '    Metode: ' + payLabel(t) + '\n'
+    text += '    Waktu: ' + shortDateTime(t.tanggal) + '\n'
+  })
+  text += '━━━━━━━━━━━━━━━━━━'
+  const nav = []
+  if (pg > 1) nav.push({ text: '⬅️ Sebelum', callback_data: 'riwayatdep_page_' + (pg - 1) })
+  if (pg < totalPages) nav.push({ text: 'Lanjut ➡️', callback_data: 'riwayatdep_page_' + (pg + 1) })
+  const rows = []
+  if (nav.length) rows.push(nav)
+  rows.push([{ text: '🔙 Kembali', callback_data: 'riwayat_menu' }])
   return { text: text, keyboard: { inline_keyboard: rows }, parseMode: 'Markdown' }
 }
 
@@ -776,6 +817,17 @@ async function handleDepositState(env, msg, state) {
         + '<blockquote>Saldo ' + ParseIdr(amount) + ' masuk ke akun kamu</blockquote>\n'
         + '<pre>\u00bb Jumlah : ' + ParseIdr(amount) + '\n\u00bb Saldo  : ' + ParseIdr(saldo) + '\n\u00bb Waktu  : ' + wktS + '</pre>'
       await tgSendMessage(env, chatId, depMsgS, getMainMenuKeyboard(), 'HTML')
+      try {
+        const { generateUniqueOrderId: _genOid } = await import('./helpers.js')
+        const dtrx = await readJSON(env, 'Trx', [])
+        dtrx.push({
+          trxid: await _genOid(env, orderBotName || NamaBot || 'BOT'), user_id: chatId, tipe: 'deposit',
+          produk: 'Deposit Saldo', varian: '-', jumlah: 1,
+          total: amount, saldo: saldo, payment_method: 'Simulasi',
+          tanggal: new Date().toISOString(), status: 'Lunas'
+        })
+        await writeJSON(env, 'Trx', dtrx)
+      } catch (e) {}
       return
     }
     const agD = await getActiveGateway(env)
@@ -1591,4 +1643,4 @@ async function sendTxLog(env, { type, user, produk, varian, total, reason, fileT
   }
 }
 
-export { handleMessage, showProductList, sendProductListPage, showVariants, sendRiwayatPage, sendBannerCard, sendTextCard, buildProductListView, buildVariantView, buildOrderView, buildPaymentView, buildRiwayatView, showPopularProducts, showLeaderboard, showTicketMenu, handleTicketState, sendTxLog }
+export { handleMessage, showProductList, sendProductListPage, showVariants, showRiwayat, showRiwayatJenis, sendRiwayatPage, sendBannerCard, sendTextCard, buildProductListView, buildVariantView, buildOrderView, buildPaymentView, buildRiwayatView, buildRiwayatDepositView, showPopularProducts, showLeaderboard, showTicketMenu, handleTicketState, sendTxLog }

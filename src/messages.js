@@ -512,9 +512,7 @@ function buildVariantView(kat, variants, fsMap = {}, sold = 0) {
   cap += '\n<i>Refresh at ' + getTanggalJam().jam + ' WIB</i>'
   const rows = []
   for (const v of variants) {
-    const fs = fsMap[String(v.id)]
-    const prefix = fs ? '✧ ' : ''
-    rows.push([{ text: prefix + v.nameproduct, callback_data: 'dpi_' + v.id }])
+    rows.push([{ text: v.nameproduct, callback_data: 'dpi_' + v.id }])
   }
   rows.push([{ text: '🔙 Kembali', callback_data: 'back_to_list' }])
   return { caption: cap, keyboard: { inline_keyboard: rows }, parseMode: 'HTML' }

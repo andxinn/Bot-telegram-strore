@@ -480,17 +480,22 @@ export async function recordStokBaru(env, variantId, count) {
     const productName = kat ? kat.produkName : (p.nameproduct || '-')
     const list = await readJSON(env, 'StokBaru', [])
     const existing = list.find(e => String(e.id) === String(variantId))
-    if (existing) { existing.count += count; existing.notifyPending = true }
-    else { list.push({ id: variantId, variant: p.nameproduct || '-', product: productName, count, notifyPending: true }) }
+    if (existing) { existing.count += count; existing.notifyPending = true; if (existing.excluded === undefined) existing.excluded = false }
+    else { list.push({ id: variantId, variant: p.nameproduct || '-', product: productName, count, notifyPending: true, excluded: false }) }
     await writeJSON(env, 'StokBaru', list)
   } catch (e) {}
 }
 
-// Broadcast HANYA entri yang baru di-add (notifyPending) — real-time per produk.
-// Arsip lama (sudah pernah di-notif) tidak ikut kekirim lagi.
-async function buildStokBaruBroadcast(env, onlyPending = true) {
+// Rakit pesan broadcast dari subset entri (default: pending && ikut).
+// onlyIds: batasi ke ID tertentu (dipakai kirim manual per snapshot).
+async function buildStokBaruBroadcast(env, onlyPending = true, onlyIds = null) {
   const list = await readJSON(env, 'StokBaru', [])
-  const items = onlyPending ? (list || []).filter(e => e.notifyPending) : (list || [])
+  let items = onlyPending ? (list || []).filter(e => e.notifyPending) : (list || [])
+  items = items.filter(e => !e.excluded)
+  if (onlyIds) {
+    const seen = new Set(onlyIds.map(String))
+    items = items.filter(e => seen.has(String(e.id)))
+  }
   if (!items || items.length === 0) return null
   const groups = {}
   const order = []
@@ -535,6 +540,67 @@ async function countSisaStok(env, variantId) {
   } catch (e) { return 0 }
 }
 
+// ─── BC STOK MANUAL: render panel antrian (10/halaman) ───
+const BC_STOK_PER_PAGE = 10
+async function bcStokPanel(env, chatId, messageId, page) {
+  const { tgEditMessageText } = await import('./telegram.js')
+  const cfg = await readJSON(env, 'BotConfig', {})
+  const autoOn = cfg.stokAutoNotif !== false
+  const list = await readJSON(env, 'StokBaru', [])
+  const pending = (list || []).filter(e => e.notifyPending)
+  const ikut = pending.filter(e => !e.excluded).length
+  const jangan = pending.length - ikut
+  const pages = Math.max(1, Math.ceil(pending.length / BC_STOK_PER_PAGE))
+  const pg = Math.min(Math.max(0, page || 0), pages - 1)
+  let txt = '*🆕 BC STOK BARU — MANUAL*\n\n'
+  txt += '*Mode Otomatis :* ' + (autoOn ? '🔔 AKTIF' : '🔕 MATI (manual)') + '\n'
+  if (autoOn) txt += '_Add stok langsung terkirim sendiri tiap 1 menit (1 pesan = 1 varian)._\n'
+  else txt += '_Add stok menumpuk di bawah, tidak terkirim sendiri._\n'
+  txt += '\n*Antrian (' + pending.length + '):* ' + ikut + ' ikut, ' + jangan + ' jangan'
+  if (pages > 1) txt += ' — Hal ' + (pg + 1) + '/' + pages
+  txt += '\n'
+  const rows = []
+  if (pending.length === 0) {
+    txt += '\n_Kosong. Tambahkan stok dulu lewat 📦 Add Stock._\n'
+  } else {
+    const start = pg * BC_STOK_PER_PAGE
+    const slice = pending.slice(start, start + BC_STOK_PER_PAGE)
+    slice.forEach((e, i) => {
+      const no = start + i + 1
+      const st = e.excluded ? 'JANGAN' : 'IKUT'
+      txt += no + '. ' + (e.variant || '-') + ' — *+' + (e.count || 0) + ' stok* [' + st + ']\n'
+    })
+    // Tombol toggle 3 per baris
+    for (let i = 0; i < slice.length; i += 3) {
+      const brow = slice.slice(i, i + 3).map((e, j) => {
+        const no = start + i + j + 1
+        const aksi = e.excluded ? 'IKUT' : 'JANGAN'
+        return { text: no + ' → ' + aksi, callback_data: 'adm_bc_stokbaru_tg_' + (start + i + j) + '_pg' + pg }
+      })
+      rows.push(brow)
+    }
+    if (pages > 1) {
+      const nav = []
+      if (pg > 0) nav.push({ text: '‹ Prev', callback_data: 'adm_bc_stokbaru_pg_' + (pg - 1) })
+      if (pg < pages - 1) nav.push({ text: 'Next ›', callback_data: 'adm_bc_stokbaru_pg_' + (pg + 1) })
+      rows.push(nav)
+    }
+  }
+  txt += '\n*Fungsi tombol:*\n'
+  txt += 'Nomor → IKUT/JANGAN — pilih produk yang ikut broadcast, tekan 1x berubah.\n'
+  txt += 'Ikut Semua / Jangan Semua — 1x tekan untuk semua antrian.\n'
+  txt += '👁 Preview — lihat pesan user tanpa mengirim.\n'
+  txt += '✅ Kirim Sekarang — kirim hanya yang IKUT.\n'
+  txt += '🔔/🔕 Auto — ON = add stok langsung terkirim sendiri.\n'
+  txt += '🗑 Hapus Antrian — buang semua tanpa mengirim, stok aman.'
+  rows.push([{ text: '✅ Ikut Semua', callback_data: 'adm_bc_stokbaru_all_1_pg' + pg }, { text: '❌ Jangan Semua', callback_data: 'adm_bc_stokbaru_all_0_pg' + pg }])
+  if (ikut > 0) rows.push([{ text: '👁 Preview Pesan User', callback_data: 'adm_bc_stokbaru_prev' }])
+  if (ikut > 0) rows.push([{ text: '✅ Kirim Sekarang (' + ikut + ' produk)', callback_data: 'adm_bc_stokbaru_go' }])
+  rows.push([{ text: (autoOn ? '🔔 Auto : ON' : '🔕 Auto : OFF'), callback_data: 'adm_bc_stokbaru_auto_pg' + pg }, { text: '🗑 Hapus Antrian', callback_data: 'adm_bc_stokbaru_clear' }])
+  rows.push([{ text: '🔙 Kembali', callback_data: 'adm_broadcast' }])
+  await tgEditMessageText(env, chatId, messageId, txt, { inline_keyboard: rows }, 'Markdown')
+}
+
 // ─── Notif stok otomatis (cron tiap menit) ───
 // Chunked + resumable: state disimpan di StokNotifState (cursor idx) supaya
 // ribuan user pun pasti terkirim semua walau satu tick cron dibatasi waktunya.
@@ -559,9 +625,11 @@ export async function flushStokBaruNotif(env) {
     const list = await readJSON(env, 'StokBaru', [])
 
     if (!st) {
-      const pending = (list || []).filter(e => e.notifyPending)
+      const pending = (list || []).filter(e => e.notifyPending && !e.excluded)
       if (pending.length === 0) return { ok: true, sent: 0 }
-      const msg = await buildStokBaruBroadcast(env)
+      // AUTO: 1 pesan = 1 varian (ambil antrian pertama saja, sisanya tick berikutnya)
+      const first = pending[0]
+      const msg = await buildStokBaruBroadcast(env, true, [first.id])
       if (!msg) return { ok: false, reason: 'empty' }
       const banned = await readJSON(env, 'BannedUser', [])
       const banSet = new Set((banned || []).map(b => String(b.sender)))
@@ -573,9 +641,9 @@ export async function flushStokBaruNotif(env) {
         await writeJSON(env, 'StokBaru', rest0)
         return { ok: true, sent: 0, total: 0 }
       }
-      // Snapshot entri yang dikirim sekarang: admin tambah stok tengah jalan
-      // tidak ikut di-reset, dikirim di siklus berikutnya.
-      st = { msg, targets, idx: 0, sent: 0, retry429: [], snapshot: pending.map(e => ({ id: e.id })) }
+      // Snapshot HANYA varian yang dikirim sekarang (first). Entri lain
+      // (tambah tengah jalan / antrian berikut) tetap pending → siklus berikut.
+      st = { msg, targets, idx: 0, sent: 0, retry429: [], snapshot: [{ id: first.id }] }
     }
 
     const { tgSendMessage: sendMsg, tgSendPhotoBase64: sendPhoto } = await import('./telegram.js')
@@ -2612,50 +2680,124 @@ export async function handleAdminCallback(env, cq) {
     return
   }
 
-  if (data === 'adm_bc_stokbaru') {
-    const preview = await buildStokBaruBroadcast(env)
-    if (!preview) {
-      await tgEditMessageText(env, chatId, messageId,
-        '⚠️ Belum ada stok baru untuk di-broadcast.\nTambahkan stok dulu lewat 📦 Add Stock.',
-        { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_broadcast' }]] }, '')
-      return
-    }
-    await tgEditMessageText(env, chatId, messageId,
-      '👁 Pesan berikut akan dikirim ke semua user:\n\n' + preview,
-      { inline_keyboard: [
-        [{ text: '✅ Kirim ke Semua', callback_data: 'adm_bc_stokbaru_go' }],
-        [{ text: '🔙 Batal', callback_data: 'adm_broadcast' }]
-      ] }, 'Markdown')
+  // ─── BC STOK MANUAL: panel antrian + seleksi ikut/jangan (10/halaman) ───
+  if (data === 'adm_bc_stokbaru' || data.startsWith('adm_bc_stokbaru_pg_')) {
+    const page = data.startsWith('adm_bc_stokbaru_pg_') ? (parseInt(data.replace('adm_bc_stokbaru_pg_', '')) || 0) : 0
+    await bcStokPanel(env, chatId, messageId, page)
     return
   }
 
-  if (data === 'adm_bc_stokbaru_go') {
-    const bcMsg = await buildStokBaruBroadcast(env)
-    if (!bcMsg) {
-      await tgEditMessageText(env, chatId, messageId,
-        '⚠️ Tidak ada stok baru untuk dikirim.',
-        { inline_keyboard: [[{ text: '🔙 Kembali', callback_data: 'adm_broadcast' }]] }, '')
-      return
-    }
-    const bcUsers = await readJSON(env, 'UserList', [])
-    const bcCfg = await readJSON(env, 'BotConfig', {})
-    const bcImg = bcCfg.stokBcImg || null
-    let bcSent = 0
-    for (const u of bcUsers) {
-      try {
-        if (bcImg) { await tgSendPhotoBase64(env, u.chatId, bcImg, bcMsg, null, 'Markdown') }
-        else { await tgSendMessage(env, u.chatId, bcMsg, null, 'Markdown') }
-        bcSent++; await sleep(50)
-      } catch (e) {}
-    }
-    // Reset flag pending saja — arsip tetap tersimpan untuk referensi
+  // ─── BC STOK MANUAL: toggle ikut/jangan per baris ───
+  if (data.startsWith('adm_bc_stokbaru_tg_')) {
+    const parts = data.replace('adm_bc_stokbaru_tg_', '').split('_pg')
+    const idx = parseInt(parts[0])
+    const page = parseInt(parts[1] || '0') || 0
     try {
-      const curList = await readJSON(env, 'StokBaru', [])
-      await writeJSON(env, 'StokBaru', (curList || []).map(e => ({ ...e, notifyPending: false })))
+      const list = await readJSON(env, 'StokBaru', [])
+      const pending = (list || []).filter(e => e.notifyPending)
+      if (!isNaN(idx) && pending[idx]) {
+        const target = list.find(e => String(e.id) === String(pending[idx].id))
+        if (target) { target.excluded = !target.excluded; await writeJSON(env, 'StokBaru', list) }
+      }
     } catch (e) {}
-    await tgEditMessageText(env, chatId, messageId,
-      '✅ Broadcast Stok Terbaru terkirim ke ' + bcSent + '/' + bcUsers.length + ' user.\nStatus notif direset (arsip tetap tersimpan).',
-      { inline_keyboard: [[{ text: '🔙 Ke Panel', callback_data: 'adm_panel' }]] }, '')
+    await bcStokPanel(env, chatId, messageId, page)
+    return
+  }
+
+  // ─── BC STOK MANUAL: ikut semua / jangan semua ───
+  if (data.startsWith('adm_bc_stokbaru_all_')) {
+    const parts = data.replace('adm_bc_stokbaru_all_', '').split('_pg')
+    const val = parts[0] === '1'
+    const page = parseInt(parts[1] || '0') || 0
+    try {
+      const list = await readJSON(env, 'StokBaru', [])
+      for (const e of (list || [])) { if (e.notifyPending) e.excluded = !val }
+      await writeJSON(env, 'StokBaru', list)
+    } catch (e) {}
+    await bcStokPanel(env, chatId, messageId, page)
+    return
+  }
+
+  // ─── BC STOK MANUAL: toggle auto ON/OFF ───
+  if (data.startsWith('adm_bc_stokbaru_auto')) {
+    const page = data.includes('_pg') ? (parseInt(data.split('_pg')[1]) || 0) : 0
+    const cfg = await readJSON(env, 'BotConfig', {})
+    cfg.stokAutoNotif = (cfg.stokAutoNotif !== false) ? false : true
+    await writeJSON(env, 'BotConfig', cfg)
+    await tgAnswerCallbackQuery(env, cqId, cfg.stokAutoNotif ? '🔔 Auto AKTIF' : '🔕 Auto MATI (manual)')
+    await bcStokPanel(env, chatId, messageId, page)
+    return
+  }
+
+  // ─── BC STOK MANUAL: hapus antrian (pending=false, stok aman) ───
+  if (data === 'adm_bc_stokbaru_clear') {
+    try {
+      const list = await readJSON(env, 'StokBaru', [])
+      await writeJSON(env, 'StokBaru', (list || []).map(e => ({ ...e, notifyPending: false })))
+    } catch (e) {}
+    await tgAnswerCallbackQuery(env, cqId, '🗑 Antrian dibuang (stok aman)')
+    await bcStokPanel(env, chatId, messageId, 0)
+    return
+  }
+
+  // ─── BC STOK MANUAL: preview ke admin saja ───
+  if (data === 'adm_bc_stokbaru_prev') {
+    const bcMsg = await buildStokBaruBroadcast(env)
+    if (!bcMsg) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Tidak ada yang ikut (semua JANGAN/kosong)', true); return }
+    await tgSendMessage(env, chatId, '👁 *Preview — persis yang diterima user:*\n\n' + bcMsg, null, 'Markdown')
+    await tgAnswerCallbackQuery(env, cqId, '👁 Preview terkirim')
+    return
+  }
+
+  // ─── BC STOK MANUAL: kirim sekarang (snapshot + lock cron yang sama) ───
+  if (data === 'adm_bc_stokbaru_go') {
+    const gotLock = await acquireLock(env, 'cron_stoknotif', 55)
+    if (!gotLock) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Broadcast lain sedang jalan, tunggu selesai', true); return }
+    try {
+      const list = await readJSON(env, 'StokBaru', [])
+      const ikut = (list || []).filter(e => e.notifyPending && !e.excluded)
+      if (ikut.length === 0) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Tidak ada yang ikut', true); return }
+      const bcMsg = await buildStokBaruBroadcast(env)
+      if (!bcMsg) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Pesan kosong', true); return }
+      const bcUsers = await readJSON(env, 'UserList', [])
+      const bcCfg = await readJSON(env, 'BotConfig', {})
+      const bcImg = bcCfg.stokBcImg || null
+      const banned = await readJSON(env, 'BannedUser', [])
+      const banSet = new Set((banned || []).map(b => String(b.sender)))
+      const targets = (bcUsers || []).map(u => u.chatId).filter(id => Number(id) > 0 && !banSet.has(String(id)))
+      const snapIds = new Set(ikut.map(e => String(e.id)))
+      let bcSent = 0
+      for (let i = 0; i < targets.length; i += 25) {
+        const batch = targets.slice(i, i + 25)
+        const results = await Promise.allSettled(batch.map(async (uid) => {
+          try {
+            const r = bcImg
+              ? await tgSendPhotoBase64(env, uid, bcImg, bcMsg, null, 'Markdown')
+              : await tgSendMessage(env, uid, bcMsg, null, 'Markdown')
+            if (r && r.ok === false && r.error_code === 429 && r.parameters && r.parameters.retry_after) {
+              await new Promise(rr => setTimeout(rr, Math.min(Number(r.parameters.retry_after) || 1, 30) * 1000))
+              const r2 = bcImg
+                ? await tgSendPhotoBase64(env, uid, bcImg, bcMsg, null, 'Markdown')
+                : await tgSendMessage(env, uid, bcMsg, null, 'Markdown')
+              if (r2 && r2.ok === false) throw new Error('tg ' + r2.error_code)
+            } else if (r && r.ok === false) throw new Error('tg ' + r.error_code)
+            return true
+          } catch (e) { throw e }
+        }))
+        for (const r of results) { if (r.status === 'fulfilled') bcSent++ }
+        if ((i + 25) < targets.length) await sleep(800)
+      }
+      // Reset HANYA yang ikut snapshot — add baru tengah jalan tetap pending
+      try {
+        const curList = await readJSON(env, 'StokBaru', [])
+        await writeJSON(env, 'StokBaru', (curList || []).map(e => (snapIds.has(String(e.id)) ? { ...e, notifyPending: false } : e)))
+      } catch (e) {}
+      await tgEditMessageText(env, chatId, messageId,
+        '✅ Broadcast terkirim ke ' + bcSent + '/' + targets.length + ' user (' + ikut.length + ' produk).\nStatus notif direset (arsip tetap tersimpan).',
+        { inline_keyboard: [[{ text: '🔙 Ke Panel', callback_data: 'adm_panel' }]] }, '')
+    } finally {
+      await releaseLock(env, 'cron_stoknotif')
+    }
     return
   }
 

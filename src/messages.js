@@ -468,11 +468,11 @@ async function sendCardWithLoading(env, chatId, caption, keyboard, useBanner, fr
     const l = await tgSendMessage(env, chatId, buildLoadingText(10))
     loadingMid = (l && l.result) ? l.result.message_id : null
   } catch (e) {}
-  // 2) Animasi loading berjalan SAMPAI 100% (edit teks -> andal, dibungkus try/catch)
+  // 2) Animasi halus: step kecil tiap 120ms (~1 detik total, tidak lebih lambat)
   if (loadingMid) {
-    for (const pct of [40, 70, 100]) {
+    for (const pct of [15, 30, 45, 60, 75, 90, 100]) {
       try { await tgEditMessageText(env, chatId, loadingMid, buildLoadingText(pct)) } catch (e) {}
-      await sleep(250)
+      await sleep(120)
     }
   }
   // 3) Setelah loading 100%, kirim kartu final (foto + list produk) sebagai pesan baru

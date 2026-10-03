@@ -51,9 +51,9 @@ function chunkArray(array, size) {
 const sleep = async (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 function loadingBar(percent) {
-  const total = 10
+  const total = 12
   const filled = Math.max(0, Math.min(total, Math.round((percent / 100) * total)))
-  return '\u25b0'.repeat(filled) + '\u25b1'.repeat(total - filled) + '  ' + percent + '%'
+  return '▰'.repeat(filled) + '▱'.repeat(total - filled) + '  ' + percent + '%'
 }
 
 function toCRC16(str) {

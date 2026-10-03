@@ -411,15 +411,19 @@ async function processPaymentSuccess(env, session, matchData) {
   const katMatch = kategoriList.find(k => String(k.produkId) === String(p.category))
   const snkData = katMatch ? snkList.find(s => String(s.id) === String(katMatch.id)) : null
   const snkText = snkData ? snkData.snk : 'Tidak ada syarat dan ketentuan'
-  let suc = '╭───〔 ✅ *PEMBELIAN BERHASIL* 〕───\n' +
-  '┊ 🛍️ RINCIAN PESANAN\n' +
-  '┊ `' + String('Produk').padEnd(10, ' ') + ' : ' + details.produk + '`\n' +
-  '┊ `' + String('Variasi').padEnd(10, ' ') + ' : ' + details.produk_nama + '`\n' +
-  '┊ `' + String('Jumlah').padEnd(10, ' ') + ' : x' + jumlahPesanan + '`\n' +
-  '┊ `' + String('Total').padEnd(10, ' ') + ' : ' + ParseIdr(details.total_amount) + '`\n' +
-  '┊ ──────────────────\n' +
-  '┊ 🧾 `ID : ' + session.id + '`\n' +
-  '╰──────────────────\n\nAkun dikirim di file .txt di atas 👆'
+  let suc = 'PEMBAYARAN TERKONFIRMASI ✅\n'
+  + 'Terima kasih, pembayaran Anda telah diterima!\n\n'
+  + 'Rincian Pesanan:\n'
+  + '╭ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ╮\n'
+  + '┊ Produk: ' + escapeMarkdown(details.produk) + '\n'
+  + '┊ Variasi: ' + escapeMarkdown(details.produk_nama) + '\n'
+  + '┊ Jumlah Pesanan: x' + jumlahPesanan + '\n'
+  + '┊ Total Pembayaran: ' + ParseIdr(details.total_amount) + '\n'
+  + '╰ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ╯\n\n'
+  + 'ID Transaksi:\n'
+  + '`' + session.id + '`\n\n'
+  + 'Terimakasih Sudah Membeli Di Toko Kami\n'
+  + '🔗 Akun dikirim di file .txt di atas'
   let fileContent = 'INFO ORDER\n'
   fileContent += 'Nomor: ' + session.id + '\n'
   fileContent += 'Tanggal: ' + formatWIB(new Date().toISOString()) + '\n'

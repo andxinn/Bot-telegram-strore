@@ -2688,8 +2688,73 @@ export async function handleAdminCallback(env, cq) {
     return
   }
 
-  // ═════ STEP 1: pilih varian ═════
+  // ═════ STEP 1: pilih kategori → varian (single langsung lanjut) ═════
   if (data === 'adm_fs_new') {
+    const produk = await readJSON(env, 'Produk', [])
+    const kategori = await readJSON(env, 'Kategori', [])
+    const fsAll = await readJSON(env, 'FlashSale', {})
+    // filter kategori: ada varian eligible (stok > 0, belum FS)
+    const rows = []
+    for (const k of kategori) {
+      const vs = produk.filter(p => p.category === k.produkId)
+      const elig = vs.filter(p => (p.stok || []).length > 0 && !fsAll[String(p.id)])
+      if (elig.length === 0) continue
+      const sv = vs.find(v => v.single)
+      const lbl = sv ? ('📦 ' + k.produkName + ' · langsung') : ('🗂️ ' + k.produkName + ' (' + elig.length + ' varian)')
+      rows.push([{ text: lbl, callback_data: 'adm_fs_kat_' + k.id }])
+    }
+    if (rows.length === 0) {
+      rows.push([{ text: 'ℹ️ Tidak ada produk eligible', callback_data: 'adm_flashsale' }])
+    }
+    rows.push([{ text: '🔙 Kembali', callback_data: 'adm_flashsale' }])
+    await tgEditMessageText(env, chatId, messageId,
+      '*🔥 Flash Sale — STEP 1/4*\n\nPilih produk yang mau flash sale:\n_(hanya produk dengan stok > 0 dan belum ada FS aktif)_',
+      { inline_keyboard: rows }, 'Markdown'
+    )
+    return
+  }
+
+  // ═════ STEP 1b: pilih varian (hanya kategori multi-varian) ═════
+  if (data.startsWith('adm_fs_kat_')) {
+    const produk = await readJSON(env, 'Produk', [])
+    const kategori = await readJSON(env, 'Kategori', [])
+    const katId = data.replace('adm_fs_kat_', '')
+    const k = kategori.find(kt => String(kt.id) === String(katId))
+    if (!k) return
+    const fsAll = await readJSON(env, 'FlashSale', {})
+    const vs = produk.filter(p => p.category === k.produkId)
+    const sv = vs.find(v => v.single)
+    if (sv && (sv.stok || []).length > 0 && !fsAll[String(sv.id)]) {
+      // produk langsung — lompat ke STEP 2 tanpa tanya varian
+      await writeJSON(env, 'adminState_' + fromId, {
+        action: 'fs_price', variantId: sv.id, originalPrice: sv.price, variantName: sv.nameproduct
+      })
+      await tgEditMessageText(env, chatId, messageId,
+        '*💰 Flash Sale — STEP 2/4*\n\n📦 ' + sv.nameproduct + ' (harga normal ' + ParseIdr(sv.price) + ')\n\nMasukkan *harga sale* (angka saja):',
+        null, 'Markdown'
+      )
+      return
+    }
+    const rows = []
+    for (const p of vs) {
+      const stokCount = (p.stok || []).length
+      if (stokCount <= 0) continue
+      if (fsAll[String(p.id)]) continue
+      rows.push([{ text: p.nameproduct + ' (Rp ' + Number(p.price).toLocaleString('id-ID') + ' | stok ' + stokCount + ')', callback_data: 'adm_fs_pick_' + p.id }])
+    }
+    if (rows.length === 0) {
+      rows.push([{ text: 'ℹ️ Tidak ada varian eligible', callback_data: 'adm_fs_new' }])
+    }
+    rows.push([{ text: '🔙 Kembali', callback_data: 'adm_fs_new' }])
+    await tgEditMessageText(env, chatId, messageId,
+      '*🔥 Flash Sale — ' + k.produkName + '*\n\nPilih varian yang mau flash sale:',
+      { inline_keyboard: rows }, 'Markdown'
+    )
+    return
+  }
+
+  // ═════ STEP 1 lama (fallback): list mentah — dipertahankan untuk kompatibilitas ═════
+  if (data === 'adm_fs_pick') {
     const { flashSaleCleanupAll } = await import('./user.js')
     await flashSaleCleanupAll(env)
     const fsAll = await readJSON(env, 'FlashSale', {})

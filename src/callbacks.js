@@ -7,7 +7,7 @@ import { getManagePanel, getMainMenuKeyboard } from './keyboard.js'
 import { generateQris } from './qris.js'
 import { getActiveGateway, pakasirConfigured, calcFee, feeLabel, methodLabel, pakasirCreate, pakasirCancel, pakasirDetail, pakasirSimulate, qrImageUrl } from './pakasir.js'
 import { duitkuConfigured, duitkuCreateQris, providerLabel, qrImageUrl as dkQrImageUrl } from './duitku.js'
-import { handleAdminCallback, buildTicketChatHtml } from './admin.js'
+import { handleAdminCallback } from './admin.js'
 
 async function editCard(env, cq, caption, keyboard, parseMode = 'Markdown') {
   const chatId = cq.message.chat.id
@@ -232,9 +232,10 @@ async function handleCallbackQuery(env, cq) {
 
         if (t.logMessageId) {
           try {
-            const { buildGroupTicketLogText, buildGroupTicketLogKeyboard } = await import('./admin.js')
-            const newText = buildGroupTicketLogText(t)
-            const kb = buildGroupTicketLogKeyboard(t)
+            const { renderTicketCard: rtcClose } = await import('./ticketCard.js')
+            const ccCard = rtcClose(t, { role: 'admin' })
+            const newText = ccCard.text
+            const kb = ccCard.keyboard
             await tgEditMessageText(env, t.logChatId, t.logMessageId, newText, kb, 'HTML')
           } catch (e) {}
         }

@@ -4,6 +4,7 @@ import { escapeMarkdown, ParseIdr, formatWIB, getDate, generateOrderId, sleep, g
 import { isOwner, getRole, acquireLock, releaseLock } from './user.js'
 import { getPayCfg, savePayCfg, pakasirConfigured, PAYMENT_METHODS, methodLabel, feeLabel, pakasirCreate, pakasirCancel, defaultPayCfg } from './pakasir.js'
 import { duitkuConfigured, duitkuTest, DUITKU_QRIS_PROVIDERS, providerLabel } from './duitku.js'
+import { renderTicketCard } from './ticketCard.js'
 
 // Shadow tgEditMessageText to handle cases where we edit a media/document message (deleting it and sending a new text message instead)
 async function tgEditMessageText(env, chatId, messageId, text, keyboard = null, parseMode = 'Markdown') {
@@ -1779,13 +1780,9 @@ export async function handleAdminState(env, msg, state) {
     if (state.logChatId && state.logMessageId) {
       try {
         const t = tickets[tIdx]
-        const logText = buildGroupTicketLogText(t)
-        const logKb = {
-          inline_keyboard: [
-            [{ text: '💬 Balas Tiket', callback_data: 'tk_adm_reply_' + state.ticketId }, { text: '✅ Set Selesai', callback_data: 'tk_adm_close_' + state.ticketId }]
-          ]
-        }
-        await tgEditMessageText(env, state.logChatId, state.logMessageId, logText, logKb, 'HTML')
+        const { renderTicketCard: rtcLog } = await import('./ticketCard.js')
+        const logCard = rtcLog(t, { role: 'admin', viewerId: fromId })
+        await tgEditMessageText(env, state.logChatId, state.logMessageId, logCard.text, logCard.keyboard, 'HTML')
       } catch (e) {}
     }
 
@@ -3354,10 +3351,10 @@ export async function handleAdminCallback(env, cq) {
     const isReplying = adminSt && adminSt.action === 'admin_reply_ticket' && adminSt.ticketId === tkId
     const fromName = cq.from.first_name || cq.from.username || 'Admin'
 
-    const newText = buildGroupTicketLogText(t, isReplying ? fromName : '', page)
-    const kb = buildGroupTicketLogKeyboard(t, page, isReplying)
+    const { renderTicketCard: rtcPage } = await import('./ticketCard.js')
+    const pcard = rtcPage(t, { role: 'admin', page, typing: isReplying ? fromName : '', viewerId: fromId })
     try {
-      await tgEditMessageText(env, chatId, messageId, newText, kb, 'HTML')
+      await tgEditMessageText(env, chatId, messageId, pcard.text, pcard.keyboard, 'HTML')
     } catch (e) {}
     return
   }
@@ -3377,8 +3374,9 @@ export async function handleAdminCallback(env, cq) {
       logMessageId: messageId
     })
     
-    const newText = buildGroupTicketLogText(t, fromName)
-    const kb = buildGroupTicketLogKeyboard(t, null, true)
+    const { renderTicketCard: rtcRep } = await import('./ticketCard.js')
+    const newText = rtcRep(t, { role: 'admin', typing: fromName, viewerId: fromId }).text
+    const kb = rtcRep(t, { role: 'admin', typing: fromName, viewerId: fromId }).keyboard
     try {
       await tgEditMessageText(env, chatId, messageId, newText, kb, 'HTML')
     } catch (e) {}
@@ -3402,10 +3400,10 @@ export async function handleAdminCallback(env, cq) {
     const t = tickets.find(ticket => ticket.ticketId === tkId)
     if (!t) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket tidak ditemukan.', true); return }
 
-    const newText = buildGroupTicketLogText(t)
-    const kb = buildGroupTicketLogKeyboard(t)
+    const { renderTicketCard: rtcCancel } = await import('./ticketCard.js')
+    const ccard = rtcCancel(t, { role: 'admin', viewerId: fromId })
     try {
-      await tgEditMessageText(env, chatId, messageId, newText, kb, 'HTML')
+      await tgEditMessageText(env, chatId, messageId, ccard.text, ccard.keyboard, 'HTML')
     } catch (e) {}
     return
   }
@@ -3422,10 +3420,15 @@ export async function handleAdminCallback(env, cq) {
     await writeJSON(env, 'Tickets', tickets)
 
     const t = tickets[idx]
-    const newText = buildGroupTicketLogText(t)
-    const kb = buildGroupTicketLogKeyboard(t)
+    // F2 CF: Undo kedaluwarsa 5 detik dari sekarang.
+    await writeJSON(env, 'TicketUndo_' + tkId, Date.now())
+    const { renderTicketCard: rtcClose } = await import('./ticketCard.js')
+    const closeCard = rtcClose(t, { role: 'admin', viewerId: fromId })
     try {
-      await tgEditMessageText(env, chatId, messageId, newText, kb, 'HTML')
+      await tgEditMessageText(env, chatId, messageId,
+        '🔒 <b>Tiket ditutup</b> — ' + tkId + '\n\n' + closeCard.text,
+        { inline_keyboard: [[{ text: 'Undo tutup (5 dtk)', callback_data: 'tk_adm_undo_close_' + tkId }], ...closeCard.keyboard.inline_keyboard] },
+        'HTML')
     } catch (e) {}
 
     // Tutup (bukan hapus) forum topic, arsip tetap terjaga
@@ -3447,17 +3450,48 @@ export async function handleAdminCallback(env, cq) {
       await tgSendMessage(env, t.userId, '🎫 *Tiket Bantuan Anda (' + tkId + ') telah dinyatakan Selesai oleh Admin.*', getMainMenuKeyboard(), 'Markdown')
     } catch (e) {}
 
-    // Lanjut ke tiket tertua berikutnya yang masih perlu ditangani
+    // Lanjut ke tiket tertua berikutnya — PESAN BARU (kartu Undo tetap utuh).
     const next = tickets
       .filter(x => x.status === 'open' || x.status === 'answered')
       .sort((a, b) => (a.lastActivityAt || 0) - (b.lastActivityAt || 0))[0]
     if (next && next.ticketId !== tkId) {
       await tgAnswerCallbackQuery(env, cqId, '🔒 Ditutup. Lanjut: ' + next.ticketId, false)
-      cq.data = 'tk_adm_view_' + next.ticketId
-      await handleAdminCallback(env, cq)
+      try {
+        const { renderTicketCard: rtcNext } = await import('./ticketCard.js')
+        const ncard = rtcNext(next, { role: 'admin', viewerId: fromId })
+        await tgSendMessage(env, chatId, ncard.text, ncard.keyboard, 'HTML')
+      } catch (e) {}
       return
     }
     await tgAnswerCallbackQuery(env, cqId, '🔒 Tiket ditutup. Tidak ada antrian lain.', false)
+    return
+  }
+
+  if (data.startsWith('tk_adm_undo_close_')) {
+    const tkId = data.replace('tk_adm_undo_close_', '')
+    const tickets = await readJSON(env, 'Tickets', [])
+    const idx = tickets.findIndex(ticket => ticket.ticketId === tkId)
+    if (idx === -1) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket tidak ditemukan.', true); return }
+    const undoAt = Number(await readJSON(env, 'TicketUndo_' + tkId, 0)) || 0
+    if (Date.now() - undoAt > 5000) {
+      await deleteKey(env, 'TicketUndo_' + tkId)
+      await tgAnswerCallbackQuery(env, cqId, '⏰ Masa Undo habis — pakai Buka Lagi bila perlu.', true)
+      return
+    }
+    await deleteKey(env, 'TicketUndo_' + tkId)
+    tickets[idx].status = 'answered'
+    tickets[idx].closedAt = null
+    tickets[idx].deleteTopicAt = null
+    tickets[idx].lastActivityAt = Date.now()
+    await writeJSON(env, 'Tickets', tickets)
+    const t = tickets[idx]
+    await tgAnswerCallbackQuery(env, cqId, '↩️ Penutupan dibatalkan', false)
+    if (t.logChatId && t.threadId) { try { const { tgReopenForumTopic: rt } = await import('./telegram.js'); await rt(env, t.logChatId, t.threadId) } catch (e) {} }
+    try {
+      const { renderTicketCard: rtcUndo } = await import('./ticketCard.js')
+      const card = rtcUndo(t, { role: 'admin', viewerId: fromId })
+      await tgEditMessageText(env, chatId, messageId, card.text, card.keyboard, 'HTML')
+    } catch (e) {}
     return
   }
 
@@ -3480,24 +3514,19 @@ export async function handleAdminCallback(env, cq) {
       return
     }
 
+    const { ticketDot: tDot, catLabel: cLbl, ticketAge: tAge } = await import('./ticketCard.js')
     let cap = isProses
-      ? '╭───〔 🎫 DAFTAR TIKET PROSES (' + filtered.length + ') 〕───\n'
-      : '╭───〔 🎫 DAFTAR TIKET SELESAI (' + filtered.length + ') 〕───\n'
-    cap += '┊ ' + (isProses ? 'Paling lama di atas — titik merah = >1 jam belum dijawab' : 'Terbaru di atas') + ':\n'
-    cap += '╰──────────────────\n'
+      ? '🎫 <b>ANTREAN TIKET</b> · ' + filtered.length + ' perlu ditangani\n'
+      : '🎫 <b>TIKET SELESAI</b> · ' + filtered.length + '\n'
+    cap += '<i>🔴 &gt;1 jam · 🟡 menunggu admin · 🔵 menunggu user</i>\n\n'
+    filtered.slice(0, 20).forEach(t => {
+      const age = tAge(t)
+      cap += tDot(t) + ' <b>' + t.ticketId + '</b> · ' + cLbl(t.category) + ' · ' + age.label + '\n'
+    })
 
     const rows = []
     filtered.slice(0, 20).forEach(t => {
-      const age = ticketAge(t)
-      let label
-      if (t.status === 'closed') {
-        label = '🟢 ' + t.ticketId + ' (' + t.userName + ')'
-      } else {
-        const dot = age.ms > 3600000 ? '🔴 ' : (age.waitingAdmin ? '🟡 ' : '🔵 ')
-        const cond = age.waitingAdmin ? 'belum dijawab' : 'menunggu user'
-        label = (dot + t.ticketId + ' (' + t.userName + ') • ⏳ ' + age.label + ' • ' + cond).slice(0, 60)
-      }
-      rows.push([{ text: label, callback_data: 'tk_adm_view_' + t.ticketId }])
+      rows.push([{ text: tDot(t) + ' ' + t.ticketId + ' · ' + (t.userUsername ? '@' + t.userUsername : t.userName), callback_data: 'tk_adm_view_' + t.ticketId }])
     })
     rows.push([{ text: '🔙 Kembali', callback_data: 'tk_adm_back_cat' }])
 
@@ -3533,24 +3562,9 @@ export async function handleAdminCallback(env, cq) {
       return
     }
 
-    let cap = '🎫 <b>' + t.ticketId + '</b> • 🙋 ' + mdSafe(t.userName) + '\n'
-    cap += 'Status: ' + (t.status === 'closed' ? '✅ Selesai' : (t.status === 'answered' ? '🔵 Proses (Sudah Dijawab)' : '⏳ Proses (Belum Dijawab)')) + '\n\n'
-    t.messages.forEach(m => {
-      if (m.sender === 'user') {
-        cap += '💛 *[USER - ' + m.time + ']*\n'
-        cap += '└ “_' + mdSafe(m.text) + '_”\n'
-      } else {
-        cap += '🩷 *[ADMIN - ' + m.time + ']*\n'
-        cap += '└ “_' + mdSafe(m.text) + '_”\n'
-      }
-      cap += '├──────────────────\n'
-    })
-
-    const rows = [
-      [{ text: '💬 Balas Tiket', callback_data: 'tk_adm_reply_' + t.ticketId }, { text: '✅ Set Selesai', callback_data: 'tk_adm_close_' + t.ticketId }],
-      [{ text: '🔙 Kembali', callback_data: 'tk_adm_cat_' + (t.status === 'closed' ? 'selesai' : 'proses') }]
-    ]
-    await tgEditMessageText(env, chatId, messageId, cap, { inline_keyboard: rows }, 'Markdown')
+    const { renderTicketCard: rtcView } = await import('./ticketCard.js')
+    const vcard = rtcView(t, { role: 'admin', viewerId: fromId })
+    await tgEditMessageText(env, chatId, messageId, vcard.text, vcard.keyboard, 'HTML')
     return
   }
 
@@ -5006,109 +5020,18 @@ export function ticketAge(t) {
   return { ms, label, waitingAdmin }
 }
 
+// Kompat: delegasi ke renderer tunggal ticketCard.js (P1 CF).
 export function buildTicketChatHtml(ticket, page = null, limit = 5) {
-  const username = ticket.userUsername ? '@' + ticket.userUsername : (ticket.userName || 'User')
-  const msgs = ticket.messages || []
-  const totalPages = Math.ceil(msgs.length / limit) || 1
-  let activePage = page === null || page === undefined ? totalPages : page
-  activePage = Math.max(1, Math.min(activePage, totalPages))
-  const startIdx = (activePage - 1) * limit
-  const visible = msgs.slice(startIdx, startIdx + limit)
-  let cap = ''
-  let prevSender = null
-  visible.forEach((m) => {
-    const timeStr = m.time ? ' (' + m.time + ')' : ''
-    if (prevSender && prevSender !== m.sender) cap += '<code>──────────────────</code>\n'
-    if (m.sender === 'user') {
-      const sn = m.username || username
-      cap += '<b>🙋 ' + escHtml(sn) + '</b><i>' + escHtml(timeStr) + '</i>\n' + escHtml(m.text) + '\n'
-    } else {
-      cap += '<blockquote><b>🎧 ADMIN</b><i>' + escHtml(timeStr) + '</i>\n' + escHtml(m.text) + '</blockquote>'
-    }
-    prevSender = m.sender
-  })
-  if (totalPages > 1) cap += '\n📖 <i>Halaman ' + activePage + ' dari ' + totalPages + '</i>\n'
-  return { html: cap, activePage, totalPages, startIdx }
+  const c = renderTicketCard(ticket, { role: 'user', page, limit })
+  return { html: c.text, activePage: c.activePage, totalPages: c.totalPages, startIdx: c.startIdx }
 }
-
 export function buildGroupTicketLogText(ticket, activeAdminTyping = '', page = null) {
-  const username = ticket.userUsername ? '@' + ticket.userUsername : ticket.userName
-  const age = ticketAge(ticket)
-  let cap = '🎫 <b>' + ticket.ticketId + '</b> • 🙋 ' + escHtml(username) + ' • '
-  if (ticket.status === 'closed') {
-    cap += '✅ Selesai'
-  } else if (age.waitingAdmin) {
-    cap += (age.ms > 3600000 ? '🔴' : '⏳') + ' menunggu admin (' + age.label + ')'
-  } else {
-    cap += '🔵 ada balasan (' + age.label + ')'
-  }
-  cap += '\n\n'
-
-  cap += buildTicketChatHtml(ticket, page).html
-
-  cap += '├──────────────────\n'
-  if (ticket.status === 'closed') {
-    cap += '🟢 <b>[ Status: Tiket Selesai ]</b>'
-  } else if (activeAdminTyping) {
-    cap += '✍️ <b>[ Sedang dibalas... ]</b>'
-  } else {
-    cap += '⏳ <b>[ Menunggu Admin ]</b>'
-  }
-  return cap
+  return renderTicketCard(ticket, { role: 'admin', page, typing: activeAdminTyping }).text
 }
-
 export function buildGroupTicketLogKeyboard(ticket, page = null, isReplying = false) {
-  const msgs = ticket.messages || []
-  const limit = 5
-  const totalPages = Math.ceil(msgs.length / limit) || 1
-
-  let activePage = page
-  if (activePage === null) {
-    activePage = totalPages
+  const c = renderTicketCard(ticket, { role: 'admin', page, typing: isReplying ? '…' : '' })
+  if (isReplying) {
+    return { inline_keyboard: [[{ text: 'Batal Balas', callback_data: 'tk_adm_cancel_reply_' + ticket.ticketId }], ...c.keyboard.inline_keyboard] }
   }
-  activePage = Math.max(1, Math.min(activePage, totalPages))
-
-  const rows = []
-
-  // Admin action row (di atas, paling sering dipakai)
-  if (ticket.status !== 'closed') {
-    if (isReplying) {
-      rows.push([
-        { text: '⛔ Batal Balas', callback_data: 'tk_adm_cancel_reply_' + ticket.ticketId },
-        { text: '🔒 Tutup Tiket', callback_data: 'tk_adm_close_' + ticket.ticketId }
-      ])
-    } else {
-      rows.push([
-        { text: '💬 Balas Tiket', callback_data: 'tk_adm_reply_' + ticket.ticketId },
-        { text: '🔒 Tutup Tiket', callback_data: 'tk_adm_close_' + ticket.ticketId }
-      ])
-    }
-  }
-
-  // Navigation row
-  if (totalPages > 1) {
-    const navRow = []
-    if (activePage > 1) {
-      navRow.push({ text: '◀️ Sebelumnya', callback_data: 'tk_adm_page_' + ticket.ticketId + '_' + (activePage - 1) })
-    }
-    navRow.push({ text: 'Hal ' + activePage + '/' + totalPages, callback_data: 'noop' })
-    if (activePage < totalPages) {
-      navRow.push({ text: 'Selanjutnya ▶️', callback_data: 'tk_adm_page_' + ticket.ticketId + '_' + (activePage + 1) })
-    }
-    rows.push(navRow)
-  }
-
-  // Media buttons row
-  const startIdx = (activePage - 1) * limit
-  const visibleMsgs = msgs.slice(startIdx, startIdx + limit)
-  visibleMsgs.forEach((m, idx) => {
-    const globalIdx = startIdx + idx
-    if (m.photoFileId) {
-      rows.push([{ text: '🖼️ Lihat Foto (Pesan ' + (globalIdx + 1) + ')', callback_data: 'tk_media_' + ticket.ticketId + '_' + globalIdx }])
-    } else if (m.docFileId) {
-      rows.push([{ text: '📄 Unduh ' + (m.docName || 'File') + ' (Pesan ' + (globalIdx + 1) + ')', callback_data: 'tk_media_' + ticket.ticketId + '_' + globalIdx }])
-    }
-  })
-
-  return { inline_keyboard: rows }
+  return c.keyboard
 }

@@ -51,22 +51,12 @@ async function handleMessage(env, msg) {
           tk.lastAdminAt = Date.now()
           await writeJSON(env, 'Tickets', tickets)
 
-          // Teruskan ke user
+          // Teruskan ke user: kartu penuh via renderer tunggal.
+          const { renderTicketCard: rtcFwd } = await import('./ticketCard.js')
+          const fwdCard = rtcFwd(tk, { role: 'user' })
           const userChatId = tk.userId
-          const escH = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-          let userMsg = '🔔 <b>Tanggapan Admin Baru!</b>\n'
-          userMsg += '🎫 Tiket: <code>' + tk.ticketId + '</code>\n\n'
-          userMsg += '💬 <b>Admin:</b> <i>"' + escH(textVal) + '"</i>\n'
-          userMsg += '— ' + jamHM
-          
-          const kb = {
-            inline_keyboard: [
-              [
-                { text: '✓ Selesai', callback_data: 'tk_close_' + tk.ticketId },
-                { text: '💬 Balas Pesan', callback_data: 'tk_follow_' + tk.ticketId }
-              ]
-            ]
-          }
+          let userMsg = '🔔 <b>Tanggapan Admin Baru!</b>\n\n' + fwdCard.text
+          const kb = fwdCard.keyboard
 
           let forwardOk = false
           if (photoFileId) {
@@ -87,9 +77,10 @@ async function handleMessage(env, msg) {
 
           // Update label topik
           try {
-            const { buildGroupTicketLogText, buildGroupTicketLogKeyboard } = await import('./admin.js')
-            const newLogText = buildGroupTicketLogText(tk, '')
-            const newLogKb = buildGroupTicketLogKeyboard(tk)
+            const { renderTicketCard: rtcForum } = await import('./ticketCard.js')
+            const fcard = rtcForum(tk, { role: 'admin', viewerId: msg.from.id })
+            const newLogText = fcard.text
+            const newLogKb = fcard.keyboard
             if (tk.logChatId && tk.logMessageId) {
               await tgEditMessageText(env, tk.logChatId, tk.logMessageId, newLogText, newLogKb, 'HTML')
             }
@@ -1481,13 +1472,13 @@ async function handleTicketState(env, msg, state) {
       }
 
       try {
-        const { buildGroupTicketLogText, buildGroupTicketLogKeyboard } = await import('./admin.js')
-        let logText = buildGroupTicketLogText(newTicket)
+        const { renderTicketCard: rtcNew } = await import('./ticketCard.js')
+        let logText = rtcNew(newTicket, { role: 'admin' }).text
         if (!isTopicSuccess) {
           logText = '⚠️ <b>SISTEM TOPIK GAGAL AKTIF</b>\n<i>Tiket masuk tanpa kamar topik karena penolakan Telegram. Cek chat owner untuk detail error.</i>\n\n' + logText
         }
         
-        const logKb = buildGroupTicketLogKeyboard(newTicket)
+        const logKb = rtcNew(newTicket, { role: 'admin' }).keyboard
         const logRes = await tgSendMessage(env, logger, logText, logKb, 'HTML', threadId)
         
         if (logRes && logRes.result && logRes.result.message_id) {
@@ -1616,9 +1607,10 @@ async function handleTicketState(env, msg, state) {
 
     if (t.logChatId && t.logMessageId) {
       try {
-        const { buildGroupTicketLogText, buildGroupTicketLogKeyboard } = await import('./admin.js')
-        const logText = buildGroupTicketLogText(t)
-        const logKb = buildGroupTicketLogKeyboard(t)
+        const { renderTicketCard: rtcFol } = await import('./ticketCard.js')
+        const folCard = rtcFol(t, { role: 'admin' })
+        const logText = folCard.text
+        const logKb = folCard.keyboard
         const logRes = await tgEditMessageText(env, t.logChatId, t.logMessageId, logText, logKb, 'HTML')
         if (logRes && !logRes.ok) {
           console.error('[tgEditMessageText FOLLOW UP ERROR]', logRes)

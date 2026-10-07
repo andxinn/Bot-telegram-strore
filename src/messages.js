@@ -1491,20 +1491,19 @@ async function handleTicketState(env, msg, state) {
       }
     }
 
-    // Kirim notifikasi DM ke admin/owner (tidak perlu buka grup dulu)
+    // P9: notif tiket baru ke TOPIK forumnya (bukan DM 1-1). Admin cukup buka topiknya.
     try {
-      const roles = await readJSON(env, 'Role', [])
-      const notifText = '🎫 <b>Tiket Baru Masuk!</b>\n<b>' + escH(newTicket.ticketId) + '</b> • 🙋 ' + escH(userUsn) + '\n\n' + escH(textVal)
-      const notifKb = {
-        inline_keyboard: [[
-          { text: '💬 Balas Tiket', callback_data: 'tk_adm_reply_' + newTicket.ticketId },
-          { text: '👁 Lihat di Panel', callback_data: 'tk_adm_view_' + newTicket.ticketId }
-        ]]
-      }
-      const targets = [OwnerID, ...roles.filter(r => r.role === 'admin').map(r => r.id)]
-      for (const admId of targets) {
-        if (String(admId) === String(fromId)) continue
-        try { await tgSendMessage(env, admId, notifText, notifKb, 'HTML') } catch (e) {}
+      if (newTicket.logChatId && threadId) {
+        const roles = await readJSON(env, 'Role', [])
+        const adminIds = [...new Set([OwnerID, ...roles.filter(r => r.role === 'admin').map(r => r.id)])]
+          .filter(a => String(a) !== String(fromId))
+        if (adminIds.length) {
+          const mentions = adminIds.map(a => '<a href="tg://user?id=' + a + '">admin</a>').join(' ')
+          const { catLabel: catLbl } = await import('./ticketCard.js')
+          await tgSendMessage(env, newTicket.logChatId,
+            'Baru <b>' + escH(newTicket.ticketId) + '</b> · ' + escH(catLbl(newTicket.category)) + ' · dari ' + escH(userUsn) + ' — ' + mentions,
+            null, 'HTML', threadId)
+        }
       }
     } catch (e) {
       console.error('[admin ticket notify]', e.message)

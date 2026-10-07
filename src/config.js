@@ -69,6 +69,7 @@ async function initConfig(env) {
       if (kvConfig.caraOrderText) caraOrderText = kvConfig.caraOrderText
       if (kvConfig.leaderboardEnabled !== undefined) leaderboardEnabled = kvConfig.leaderboardEnabled
       if (kvConfig.leaderboardBanner !== undefined) leaderboardBanner = kvConfig.leaderboardBanner
+      if (env.CHANNEL_TICKET) channelTicket = env.CHANNEL_TICKET
       if (kvConfig.channelTicket !== undefined) channelTicket = kvConfig.channelTicket
       if (kvConfig.ChannelLog !== undefined) ChannelLog = kvConfig.ChannelLog
       if (kvConfig.JamBackup !== undefined && kvConfig.JamBackup !== null && kvConfig.JamBackup !== '') {

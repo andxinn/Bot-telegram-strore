@@ -1522,7 +1522,7 @@ async function handleTicketState(env, msg, state) {
 
     tickets.push(newTicket)
     await writeJSON(env, 'Tickets', tickets)
-    await tgSendMessage(env, chatId, '✓ *Tiket Berhasil Dibuat!*\n\nID Tiket: `' + ticketId + '`\nAdmin akan segera menjawab laporan Anda.', getMainMenuKeyboard(), 'Markdown')
+    await tgSendMessage(env, chatId, '✓ *Tiket Berhasil Dibuat!*\n\nID Tiket: `' + ticketId + '`\nAdmin akan segera menjawab laporan Anda.\n💬 Lanjutan? Balas langsung di sini — ketik saja.', getMainMenuKeyboard(), 'Markdown')
     return
   }
 

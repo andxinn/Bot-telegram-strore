@@ -491,8 +491,19 @@ async function handleCommand(env, msg) {
     const k = key.trim()
     // Allowlist: hanya key yang dikenal, dengan validasi tipe
     const NUM_KEYS = ['JamBackup', 'OwnerID']
-    const STR_KEYS = ['NamaBot', 'StoreName', 'InvoiceLogger', 'ChannelLog', 'StoreChannel', 'CS', 'orderBotName', 'caraOrderText', 'successSticker']
+    const STR_KEYS = ['NamaBot', 'StoreName', 'InvoiceLogger', 'ChannelLog', 'StoreChannel', 'CS', 'orderBotName', 'caraOrderText', 'successSticker', 'channelTicket']
     if (!NUM_KEYS.includes(k) && !STR_KEYS.includes(k)) { await tgSendMessage(env, chatId, '⚠️ Key tidak dikenal: ' + k); return }
+    // P6: channelTicket wajib -100... + forum topics ON
+    if (k === 'channelTicket' && !/^-100\d+$/.test(value)) { await tgSendMessage(env, chatId, '⚠️ channelTicket harus ID supergroup, contoh: -1001234567890'); return }
+    if (k === 'channelTicket') {
+      try {
+        const { tgGetChat } = await import('./telegram.js')
+        const chk = await tgGetChat(env, value)
+        const ch = chk && chk.result ? chk.result : null
+        if (!ch) { await tgSendMessage(env, chatId, '⚠️ Bot tidak bisa akses channel itu. Pastikan bot sudah jadi admin di sana.'); return }
+        if (!ch.is_forum) { await tgSendMessage(env, chatId, '⚠️ Topics belum ON di channel itu. Aktifkan: Pengaturan Grup → Topics → ON, lalu ulangi.'); return }
+      } catch (e) { await tgSendMessage(env, chatId, '⚠️ Gagal cek channel: ' + e.message); return }
+    }
     const config = await readJSON(env, 'BotConfig', {})
     if (NUM_KEYS.includes(k)) {
       const n = parseInt(value)

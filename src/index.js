@@ -237,6 +237,7 @@ export default {
     await initConfig(env)
     if (event.cron === '* * * * *') {
       ctx.waitUntil(checkPendingPayments(env))
+      ctx.waitUntil((async () => { try { const { flushTicketSla } = await import('./ticket.js'); await flushTicketSla(env) } catch (e) { console.error('[cron ticketsla]', e.message) } })())
       ctx.waitUntil(flushStokBaruNotif(env).catch(e => console.error('[cron stoknotif]', e.message)))
     } else if (event.cron === '0 * * * *') {
       const wibHour = (new Date().getUTCHours() + 7) % 24

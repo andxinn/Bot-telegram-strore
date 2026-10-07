@@ -118,3 +118,30 @@ export async function forwardUserToForum(env, t, { textVal, photoFileId = null, 
 function escH(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
+
+// SLA: tiket menunggu admin >30 mnt -> pengingat ke TOPIK tiketnya, maks 1x/2 jam.
+export async function flushTicketSla(env) {
+  try {
+    const { ticketAge } = await import('./ticketCard.js')
+    const tickets = await readJSON(env, 'Tickets', [])
+    let changed = false
+    for (const t of tickets) {
+      if (t.status === 'closed') continue
+      const age = ticketAge(t)
+      if (!age.waitingAdmin || age.ms < 30 * 60000) continue
+      const key = 'SlaNotif_' + t.ticketId
+      const last = Number(await readJSON(env, key, 0)) || 0
+      if (Date.now() - last < 2 * 3600000) continue
+      await writeJSON(env, key, Date.now())
+      if (t.logChatId && t.threadId) {
+        const text = 'SLA <b>' + escH(t.ticketId) + '</b> · menunggu admin <b>' + age.label + '</b> — mohon ditanggapi.'
+        try { await tgSendMessage(env, t.logChatId, text, null, 'HTML', t.threadId) } catch (e) {}
+      }
+      changed = true
+    }
+    return changed
+  } catch (e) {
+    console.error('[flushTicketSla]', e.message)
+    return false
+  }
+}

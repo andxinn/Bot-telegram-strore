@@ -3495,6 +3495,24 @@ export async function handleAdminCallback(env, cq) {
     return
   }
 
+  // P4: klaim + ambil-alih tiket (tanpa kunci, hanya indikator penangan).
+  if (data.startsWith('tk_adm_takeover_') || data.startsWith('tk_adm_claim_')) {
+    const tkId = data.replace('tk_adm_takeover_', '').replace('tk_adm_claim_', '')
+    const tickets = await readJSON(env, 'Tickets', [])
+    const idx = tickets.findIndex(ticket => ticket.ticketId === tkId)
+    if (idx === -1) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Tiket tidak ditemukan.', true); return }
+    tickets[idx].assignedTo = fromId
+    tickets[idx].assignedName = cq.from.first_name || cq.from.username || 'Admin'
+    await writeJSON(env, 'Tickets', tickets)
+    const t = tickets[idx]
+    await tgAnswerCallbackQuery(env, cqId, data.startsWith('tk_adm_takeover_') ? '↩️ Diambil alih' : '🎧 Dipegang', false)
+    try {
+      const card = renderTicketCard(t, { role: 'admin', viewerId: fromId })
+      await tgEditMessageText(env, chatId, messageId, card.text, card.keyboard, 'HTML')
+    } catch (e) {}
+    return
+  }
+
   if (data === 'tk_adm_cat_proses' || data === 'tk_adm_cat_selesai') {
     const isProses = data === 'tk_adm_cat_proses'
     const tickets = await readJSON(env, 'Tickets', [])

@@ -8,6 +8,7 @@ import { generateQris } from './qris.js'
 import { getActiveGateway, pakasirConfigured, calcFee, feeLabel, methodLabel, pakasirCreate, pakasirCancel, pakasirDetail, pakasirSimulate, qrImageUrl } from './pakasir.js'
 import { duitkuConfigured, duitkuCreateQris, providerLabel, qrImageUrl as dkQrImageUrl } from './duitku.js'
 import { handleAdminCallback } from './admin.js'
+import { TICKET_CATS } from './ticketCard.js'
 
 async function editCard(env, cq, caption, keyboard, parseMode = 'Markdown') {
   const chatId = cq.message.chat.id
@@ -46,9 +47,29 @@ async function handleCallbackQuery(env, cq) {
 
   // ─── TICKETING CALLBACKS ───
   if (data === 'tk_create') {
-    await tgAnswerCallbackQuery(env, cqId, '📝 Membuka formulir tiket bantuan', false)
-    await writeJSON(env, 'ticketState_' + fromId, { step: 'input_msg', cardMessageId: messageId })
-    await editCard(env, cq, '📝 *BUAT TIKET BARU*\n\nSilakan ketik dan kirimkan rincian kendala/masalah Anda secara lengkap (minimal 5 karakter).\n\n_Ketik /batal jika ingin membatalkan._', null)
+    await tgAnswerCallbackQuery(env, cqId, '📝 Buat tiket baru', false)
+    const rows = Object.entries(TICKET_CATS).map(([k, v]) => ({ text: v, callback_data: 'tk_new_' + k }))
+    await editCard(env, cq, '📝 <b>Tiket Baru</b> — ini tentang apa?\n\nPilih jenis agar admin cepat menangani:', {
+      inline_keyboard: [rows.slice(0, 2), rows.slice(2, 4)]
+    }, 'HTML')
+    return
+  }
+
+  // P4: pilih kategori -> anti-spam 3 tiket -> input detail
+  if (data.startsWith('tk_new_')) {
+    const cat = data.replace('tk_new_', '')
+    if (!TICKET_CATS[cat]) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Jenis tidak dikenal.', true); return }
+    const myActive = (await readJSON(env, 'Tickets', [])).filter(t => String(t.userId) === String(fromId) && t.status !== 'closed')
+    if (myActive.length >= 3) {
+      await tgAnswerCallbackQuery(env, cqId, '⚠️ Maksimal 3 tiket aktif.', true)
+      await editCard(env, cq, '⚠️ Anda punya <b>3 tiket aktif</b>.\n\nLanjutkan di tiket <code>' + myActive[0].ticketId + '</code> — cukup ketik langsung di chat.', {
+        inline_keyboard: [[{ text: 'Buka Tiket Aktif', callback_data: 'tk_view_' + myActive[0].ticketId }], [{ text: 'Daftar Tiket', callback_data: 'tk_list' }]]
+      }, 'HTML')
+      return
+    }
+    await tgAnswerCallbackQuery(env, cqId, '📝 Ketik detail masalah Anda', false)
+    await writeJSON(env, 'ticketState_' + fromId, { step: 'input_msg', category: cat, cardMessageId: messageId })
+    await editCard(env, cq, TICKET_CATS[cat] + ' — silakan ketik masalah Anda.\n\nBisa lampirkan foto atau dokumen.\n<i>Ketik /batal untuk batal.</i>', null, 'HTML')
     return
   }
 

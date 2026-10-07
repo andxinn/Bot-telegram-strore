@@ -1439,8 +1439,12 @@ async function handleTicketState(env, msg, state) {
       userName: fromName,
       userUsername: msg.from.username || '',
       status: 'open',
+      category: state.category || 'lainnya',
+      assignedTo: null,
+      assignedName: null,
       createdAt: new Date().toISOString(),
       lastActivityAt: Date.now(),
+      lastUserAt: Date.now(),
       messages: [msgObj]
     }
 
@@ -1451,7 +1455,8 @@ async function handleTicketState(env, msg, state) {
       let apiErrorDesc = ''
       
       try {
-        const topicRes = await tgCreateForumTopic(env, logger, '🎫 [' + ticketId + '] ' + fromName)
+        const { catLabel: catLblT, catEmoji: catEmoT } = await import('./ticketCard.js')
+        const topicRes = await tgCreateForumTopic(env, logger, '🎫 [' + ticketId + '] ' + catEmoT(state.category || 'lainnya') + ' ' + catLblT(state.category || 'lainnya') + ' · ' + fromName)
         if (topicRes && topicRes.ok && topicRes.result) {
           isTopicSuccess = true
           threadId = topicRes.result.message_thread_id

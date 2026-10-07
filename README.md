@@ -18,10 +18,12 @@ src/
   keyboard.js    - Keyboard builder (reply + inline)
   commands.js    - Command handlers (/start, /pm, /manager, dll)
   messages.js    - Message handler (product numbers, deposit, PM)
-  callbacks.js   - Callback query handler (order flow, admin panel)
+  callbacks.js   - Callback query handler (order flow, admin panel, tiket user)
   payments.js    - Cron payment checker
-  backup.js      - Auto backup
+  backup.js      - Auto backup + cleanup tiket closed
   index.js       - Entry point (webhook + cron)
+  ticket.js      - Helper tiket (auto-route, SLA, sweeper 10mnt, forward forum)
+  ticketCard.js  - SATU renderer kartu tiket (user/admin/forum/list)
 dev-server.mjs   - Standalone dev server (long-polling, no Cloudflare)
 ```
 
@@ -75,8 +77,14 @@ curl https://your-worker.workers.dev/setup
 - SnK (Syarat & Ketentuan) per produk
 - Invoice ke channel log
 - PM system (user ↔ admin)
+- Tiket bantuan forum-topik v9.19 (P1-P10, lihat PRD-TIKET.md):
+  renderer tunggal, auto-route ketik langsung, inbox dot+count,
+  Undo tutup 5 dtk, kategori 4 + klaim, SLA 30mnt, channelTicket
+  resmi + validasi forum, umur 1-100hr default 7 + hapus otomatis
+  10mnt, menu 1 pintu, notif ke topik + mention (DM admin mati)
 - Roles: owner, admin, promoter
 - Ban/unban user
 - Auto backup setiap jam
 - /manager panel interaktif
+Versi: **9.19.0** (tiket P1-P10) — lihat `PRD-TIKET.md` + `CHANGELOG_v9update19.md`.
 # Bot-telegram-strore

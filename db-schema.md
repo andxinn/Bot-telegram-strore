@@ -139,23 +139,19 @@ CREATE TABLE flash_sale_history (
   product_id INTEGER, sale_price INTEGER, sold_count INTEGER, at TEXT
 );
 
--- tickets (v18.12+): forum topics helpdesk
-CREATE TABLE tickets (
-  id         TEXT PRIMARY KEY,           -- username-DD-MM-YYYY-XXXX
-  user_id    INTEGER NOT NULL,
-  status     TEXT DEFAULT 'open',        -- open | answered | closed
-  thread_id  INTEGER,                    -- forum topic id di grup support
-  group_id   INTEGER,
-  closed_at  TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
-);
-CREATE TABLE ticket_messages (
-  id         INTEGER PRIMARY KEY,
-  ticket_id  TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
-  from_role  TEXT,                       -- user | admin
-  body       TEXT, media_file_id TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
-);
+-- tickets (v9.19, KV 'Tickets' JSON — live, bukan SQL):
+--   [{ ticketId, userId, userName, userUsername, status: open|answered|closed,
+--      category: pesanan|pembayaran|akun|lainnya, assignedTo, assignedName,
+--      createdAt (ISO), closedAt (ms|null), deleteTopicAt (ms|null),
+--      lastActivityAt, lastUserAt, lastAdminAt, lastSlaAt,
+--      logChatId, threadId, logMessageId,
+--      messages: [{ sender: user|admin, text, time, username,
+--                   photoFileId?, docFileId?, docName?, at? }] }]
+-- config tiket di KV 'BotConfig': channelTicket (-100...),
+--   ticketKeepDays (1-100, default 7), ticketAutoDelTopic (true/false).
+-- state ephemeral: 'TicketUndo_<id>' (5 dtk), 'ticketState_<uid>',
+--   'adminState_<uid>' (action admin_reply_ticket / settings_ticket_keep).
+-- (Skema SQL di bawah = opsi Turso masa depan, belum dipakai untuk tiket.)
 
 -- config: ganti KV 'BotConfig' (nama bot, banner base64, channel, dll)
 CREATE TABLE config (

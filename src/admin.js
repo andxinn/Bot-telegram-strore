@@ -5111,18 +5111,3 @@ export function ticketAge(t) {
   return { ms, label, waitingAdmin }
 }
 
-// Kompat: delegasi ke renderer tunggal ticketCard.js (P1 CF).
-export function buildTicketChatHtml(ticket, page = null, limit = 5) {
-  const c = renderTicketCard(ticket, { role: 'user', page, limit })
-  return { html: c.text, activePage: c.activePage, totalPages: c.totalPages, startIdx: c.startIdx }
-}
-export function buildGroupTicketLogText(ticket, activeAdminTyping = '', page = null) {
-  return renderTicketCard(ticket, { role: 'admin', page, typing: activeAdminTyping }).text
-}
-export function buildGroupTicketLogKeyboard(ticket, page = null, isReplying = false) {
-  const c = renderTicketCard(ticket, { role: 'admin', page, typing: isReplying ? '…' : '' })
-  if (isReplying) {
-    return { inline_keyboard: [[{ text: 'Batal Balas', callback_data: 'tk_adm_cancel_reply_' + ticket.ticketId }], ...c.keyboard.inline_keyboard] }
-  }
-  return c.keyboard
-}

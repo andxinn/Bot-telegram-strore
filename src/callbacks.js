@@ -1,6 +1,6 @@
 import { NamaBot, StoreName, OwnerID, InvoiceLogger, BannerFileId, SimulatePayment, SimulateDelay, orderBotName } from './config.js'
 import { readJSON, writeJSON, deleteKey, readText, writeText, existsKey } from './kv.js'
-import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgEditMessageText, tgEditMessageMedia, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendDocumentFile, tgSendSticker, tgCloseForumTopic } from './telegram.js'
+import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgEditMessageText, tgEditMessageMedia, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendDocumentFile, tgSendSticker, tgCloseForumTopic, tgReopenForumTopic } from './telegram.js'
 import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam, generateTrxId, generateOrderId, generateUniqueOrderId, expiredTime, parseExpiredWIB } from './helpers.js'
 import { getUser, addUser, addSaldo, cekSaldo, minSaldo, isOwner, getRole, acquireLock, releaseLock } from './user.js'
 import { getManagePanel, getMainMenuKeyboard } from './keyboard.js'
@@ -101,30 +101,14 @@ async function handleCallbackQuery(env, cq) {
     }
     await tgAnswerCallbackQuery(env, cqId, '🎫 Membuka rincian tiket', false)
 
-    const userUsn = t.userUsername ? '@' + t.userUsername : (t.userName || 'User')
-    const statusLabel = t.status === 'closed' ? '✅ Selesai' : (t.status === 'answered' ? '🔵 Ada Balasan' : '⏳ Menunggu Admin')
-    const chat = buildTicketChatHtml(t, page)
+    const { renderTicketCard } = await import('./ticketCard.js')
+    const card = renderTicketCard(t, { role: 'user', page })
 
-    let cap = '🎫 <b>' + t.ticketId + '</b> • ' + statusLabel + '\n\n'
-    cap += chat.html
+    let cap = card.text
+    const rows = card.keyboard.inline_keyboard.slice()
 
-    const rows = []
-
-    // Navigation row
-    if (chat.totalPages > 1) {
-      const navRow = []
-      if (chat.activePage > 1) {
-        navRow.push({ text: '◀️ Sebelumnya', callback_data: 'tk_view_' + t.ticketId + '_' + (chat.activePage - 1) })
-      }
-      navRow.push({ text: 'Hal ' + chat.activePage + '/' + chat.totalPages, callback_data: 'noop' })
-      if (chat.activePage < chat.totalPages) {
-        navRow.push({ text: 'Selanjutnya ▶️', callback_data: 'tk_view_' + t.ticketId + '_' + (chat.activePage + 1) })
-      }
-      rows.push(navRow)
-    }
-
-    // Media buttons row
-    const visibleMsgs = t.messages ? t.messages.slice(chat.startIdx, chat.startIdx + 5) : []
+    // Media buttons row (khas CF dipertahankan)
+    const visibleMsgs = t.messages ? t.messages.slice(card.startIdx, card.startIdx + 5) : []
     visibleMsgs.forEach((m, idx) => {
       const globalIdx = chat.startIdx + idx
       if (m.photoFileId) {
@@ -134,17 +118,28 @@ async function handleCallbackQuery(env, cq) {
       }
     })
 
-    if (t.status === 'answered') {
-      rows.push([
-        { text: '✅ Tandai Selesai', callback_data: 'tk_close_' + t.ticketId, style: 'success' },
-        { text: '💬 Balas', callback_data: 'tk_follow_' + t.ticketId, style: 'primary' }
-      ])
-    } else if (t.status === 'open') {
-      rows.push([{ text: '💬 Balas / Follow Up', callback_data: 'tk_follow_' + t.ticketId }])
-    }
-    rows.push([{ text: '🔙 Daftar Tiket', callback_data: 'tk_list' }, { text: '🔙 Menu Tiket', callback_data: 'tk_back_menu' }])
-
     await editCard(env, cq, cap, { inline_keyboard: rows }, 'HTML')
+    return
+  }
+
+  if (data.startsWith('tk_reopen_')) {
+    const tkId = data.replace('tk_reopen_', '')
+    const tickets = await readJSON(env, 'Tickets', [])
+    const idx = tickets.findIndex(ticket => ticket.ticketId === tkId)
+    if (idx === -1) { await tgAnswerCallbackQuery(env, cqId, 'Tiket tidak ditemukan.', true); return }
+    const t0 = tickets[idx]
+    if (String(t0.userId) !== String(fromId)) { await tgAnswerCallbackQuery(env, cqId, 'Ini bukan tiket Anda.', true); return }
+    if (t0.status !== 'closed') { await tgAnswerCallbackQuery(env, cqId, 'Tiket masih aktif.', true); return }
+    if (!t0.closedAt || Date.now() - t0.closedAt > 7 * 24 * 3600000) { await tgAnswerCallbackQuery(env, cqId, 'Sudah lewat 7 hari — buat tiket baru.', true); return }
+    t0.status = 'open'
+    t0.closedAt = null
+    t0.lastActivityAt = Date.now()
+    await writeJSON(env, 'Tickets', tickets)
+    try { await tgReopenForumTopic(env, t0.logChatId, t0.threadId) } catch (e) {}
+    await tgAnswerCallbackQuery(env, cqId, 'Tiket dibuka lagi.', false)
+    const { renderTicketCard: rtc } = await import('./ticketCard.js')
+    const card2 = rtc(t0, { role: 'user' })
+    await editCard(env, cq, card2.text, card2.keyboard, 'HTML')
     return
   }
 

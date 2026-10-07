@@ -1755,34 +1755,11 @@ export async function handleAdminState(env, msg, state) {
     await writeJSON(env, 'Tickets', tickets)
 
     const t = tickets[tIdx]
-    const chat = buildTicketChatHtml(t)
+    const { renderTicketCard: rtcReply } = await import('./ticketCard.js')
+    const replyCard = rtcReply(t, { role: 'user' })
 
-    let userMsg = '🔔 <b>Tanggapan Admin Baru Diterima!</b>\n'
-    userMsg += '🎫 <b>' + t.ticketId + '</b> • ✅ Ada Balasan\n\n'
-    userMsg += chat.html
-
-    const userKb = { inline_keyboard: [] }
-
-    if (chat.totalPages > 1) {
-      const navRow = []
-      if (chat.activePage > 1) {
-        navRow.push({ text: '◀️ Sebelumnya', callback_data: 'tk_view_' + t.ticketId + '_' + (chat.activePage - 1) })
-      }
-      navRow.push({ text: 'Hal ' + chat.activePage + '/' + chat.totalPages, callback_data: 'noop' })
-      if (chat.activePage < chat.totalPages) {
-        navRow.push({ text: 'Selanjutnya ▶️', callback_data: 'tk_view_' + t.ticketId + '_' + (chat.activePage + 1) })
-      }
-      userKb.inline_keyboard.push(navRow)
-    }
-
-    userKb.inline_keyboard.push([
-      { text: '✅ Tandai Selesai', callback_data: 'tk_close_' + t.ticketId, style: 'success' },
-      { text: '💬 Balas', callback_data: 'tk_follow_' + t.ticketId, style: 'primary' }
-    ])
-    userKb.inline_keyboard.push([
-      { text: '🔙 Daftar Tiket', callback_data: 'tk_list' },
-      { text: '🔙 Menu Tiket', callback_data: 'tk_back_menu' }
-    ])
+    let userMsg = '🔔 <b>Tanggapan Admin Baru!</b>\n\n' + replyCard.text
+    const userKb = replyCard.keyboard
 
     try {
       const res = await tgSendMessage(env, t.userId, userMsg, userKb, 'HTML')

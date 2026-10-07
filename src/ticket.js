@@ -115,6 +115,57 @@ export async function forwardUserToForum(env, t, { textVal, photoFileId = null, 
   }
 }
 
+// Sweeper topik 10 mnt: closed + deleteTopicAt lewat -> hapus topik sekali, tiket TETAP ADA.
+export async function flushTopicDelete(env) {
+  try {
+    let autoDel = true
+    try {
+      const cfg = await readJSON(env, 'BotConfig', null)
+      if (cfg && cfg.ticketAutoDelTopic === false) autoDel = false
+    } catch {}
+    if (!autoDel) return false
+    const tickets = await readJSON(env, 'Tickets', [])
+    let changed = false
+    for (const t of tickets) {
+      if (t.status !== 'closed' || !t.deleteTopicAt) continue
+      if (Date.now() < Number(t.deleteTopicAt)) continue
+      t.deleteTopicAt = null
+      changed = true
+      if (t.logChatId && t.threadId) {
+        try {
+          const { tgDeleteForumTopic } = await import('./telegram.js')
+          await tgDeleteForumTopic(env, t.logChatId, t.threadId)
+        } catch (e) { console.error('[topicDelete]', e.message) }
+        t.threadId = null
+      }
+    }
+    if (changed) await writeJSON(env, 'Tickets', tickets)
+    return changed
+  } catch (e) {
+    console.error('[flushTopicDelete]', e.message)
+    return false
+  }
+}
+
+// Reopen setelah topik hilang -> buat topik baru.
+export async function ensureTopicAlive(env, t) {
+  if (!t || t.status === 'closed' || !t.logChatId) return t
+  if (t.threadId) return t
+  try {
+    const { tgCreateForumTopic } = await import('./telegram.js')
+    const { catLabel, catEmoji } = await import('./ticketCard.js')
+    const uname = t.userUsername ? t.userUsername : (t.userName || 'User')
+    const topicRes = await tgCreateForumTopic(env, t.logChatId, 'TKT [' + t.ticketId + '] ' + catEmoji(t.category) + ' ' + catLabel(t.category) + ' · ' + uname)
+    if (topicRes && topicRes.ok && topicRes.result) {
+      t.threadId = topicRes.result.message_thread_id
+      const all = await readJSON(env, 'Tickets', [])
+      const idx = all.findIndex(x => x.ticketId === t.ticketId)
+      if (idx !== -1) { all[idx].threadId = t.threadId; await writeJSON(env, 'Tickets', all) }
+    }
+  } catch (e) { console.error('[topicAlive]', e.message) }
+  return t
+}
+
 function escH(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }

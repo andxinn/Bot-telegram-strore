@@ -23,6 +23,8 @@ let caraOrderText = ''
 let leaderboardEnabled = true
 let leaderboardBanner = ''
 let channelTicket = ''
+let ticketKeepDays = 7
+let ticketAutoDelTopic = true
 let ButtonMenu = {
   informasi: 'Information',
   deposit: 'Deposit',
@@ -71,6 +73,8 @@ async function initConfig(env) {
       if (kvConfig.leaderboardBanner !== undefined) leaderboardBanner = kvConfig.leaderboardBanner
       if (env.CHANNEL_TICKET) channelTicket = env.CHANNEL_TICKET
       if (kvConfig.channelTicket !== undefined) channelTicket = kvConfig.channelTicket
+      if (kvConfig.ticketKeepDays !== undefined) { const kd = parseInt(kvConfig.ticketKeepDays, 10); if (Number.isFinite(kd) && kd >= 1 && kd <= 100) ticketKeepDays = kd }
+      if (kvConfig.ticketAutoDelTopic !== undefined) ticketAutoDelTopic = kvConfig.ticketAutoDelTopic !== false
       if (kvConfig.ChannelLog !== undefined) ChannelLog = kvConfig.ChannelLog
       if (kvConfig.JamBackup !== undefined && kvConfig.JamBackup !== null && kvConfig.JamBackup !== '') {
         const jb = Number(kvConfig.JamBackup)
@@ -85,5 +89,6 @@ export {
   ChannelStore, CS, JamBackup, Mode, SimulatePayment, SimulateDelay,
   WebhookSecret, DevToken, BannerFileId, DataQris,
   bannerStartB64, bannerListB64, orderBotName, caraOrderText,
-  ButtonMenu, initConfig, leaderboardEnabled, leaderboardBanner, channelTicket
+  ButtonMenu, initConfig, leaderboardEnabled, leaderboardBanner, channelTicket,
+  ticketKeepDays, ticketAutoDelTopic
 }

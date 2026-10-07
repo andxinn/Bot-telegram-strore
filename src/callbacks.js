@@ -154,8 +154,13 @@ async function handleCallbackQuery(env, cq) {
     if (!t0.closedAt || Date.now() - t0.closedAt > 7 * 24 * 3600000) { await tgAnswerCallbackQuery(env, cqId, 'Sudah lewat 7 hari — buat tiket baru.', true); return }
     t0.status = 'open'
     t0.closedAt = null
+    t0.deleteTopicAt = null
     t0.lastActivityAt = Date.now()
     await writeJSON(env, 'Tickets', tickets)
+    try {
+      const { ensureTopicAlive: etaRe } = await import('./ticket.js')
+      await etaRe(env, t0)
+    } catch (e) {}
     try { await tgReopenForumTopic(env, t0.logChatId, t0.threadId) } catch (e) {}
     await tgAnswerCallbackQuery(env, cqId, 'Tiket dibuka lagi.', false)
     const { renderTicketCard: rtc } = await import('./ticketCard.js')
@@ -244,6 +249,7 @@ async function handleCallbackQuery(env, cq) {
       const t = tickets[idx2]
       t.status = 'closed'
       t.closedAt = Date.now()
+      t.deleteTopicAt = Date.now() + 10 * 60 * 1000
       await writeJSON(env, 'Tickets', tickets)
 
       if (t.logChatId && t.threadId) {

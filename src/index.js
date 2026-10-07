@@ -238,6 +238,7 @@ export default {
     if (event.cron === '* * * * *') {
       ctx.waitUntil(checkPendingPayments(env))
       ctx.waitUntil((async () => { try { const { flushTicketSla } = await import('./ticket.js'); await flushTicketSla(env) } catch (e) { console.error('[cron ticketsla]', e.message) } })())
+      ctx.waitUntil((async () => { try { const { flushTopicDelete } = await import('./ticket.js'); await flushTopicDelete(env) } catch (e) { console.error('[cron topicdel]', e.message) } })())
       ctx.waitUntil(flushStokBaruNotif(env).catch(e => console.error('[cron stoknotif]', e.message)))
     } else if (event.cron === '0 * * * *') {
       const wibHour = (new Date().getUTCHours() + 7) % 24

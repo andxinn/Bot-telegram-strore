@@ -1708,6 +1708,23 @@ export async function handleAdminState(env, msg, state) {
     return
   }
 
+  // P7: input ketik umur 1-100
+  if (state.action === 'settings_ticket_keep') {
+    const n = parseInt(String(text || '').replace(/[^0-9]/g, ''), 10)
+    if (!Number.isFinite(n) || n < 1 || n > 100) {
+      await tgSendMessage(env, chatId, 'Angka harus 1-100. Coba lagi / ketik /batal bila tidak jadi.')
+      return
+    }
+    const cfg = await readJSON(env, 'BotConfig', {})
+    cfg.ticketKeepDays = n
+    await writeJSON(env, 'BotConfig', cfg)
+    try { const { initConfig } = await import('./config.js'); await initConfig(env) } catch {}
+    await deleteKey(env, 'adminState_' + fromId)
+    if (state.cardMessageId) { try { await tgDeleteMessage(env, chatId, state.cardMessageId) } catch (e) {} }
+    await tgSendMessage(env, chatId, 'Umur topik tiket: ' + n + ' hari.')
+    return
+  }
+
   if (state.action === 'admin_reply_ticket') {
     const hasMedia = (msg.photo && msg.photo.length > 0) || msg.document
     if (!hasMedia && text.length < 2) {
@@ -3291,6 +3308,58 @@ export async function handleAdminCallback(env, cq) {
     data = 'adm_settings'
   }
 
+  // P7: panel umur topik tiket (1-100 hari + hapus otomatis 10 mnt).
+  if (data === 'adm_ticket_keep' || data.startsWith('adm_ticket_keep_')) {
+    const KEEP_OPTS = [1, 3, 7, 14, 30, 100]
+    let cfg = await readJSON(env, 'BotConfig', {})
+    if (cfg.ticketKeepDays === undefined) cfg.ticketKeepDays = 7
+    if (cfg.ticketAutoDelTopic === undefined) cfg.ticketAutoDelTopic = true
+    if (data.startsWith('adm_ticket_keep_') && data !== 'adm_ticket_keep_custom' && data !== 'adm_ticket_keep_topic') {
+      const n = parseInt(data.replace('adm_ticket_keep_', ''), 10)
+      if (KEEP_OPTS.includes(n)) {
+        cfg.ticketKeepDays = n
+        await writeJSON(env, 'BotConfig', cfg)
+        try { const { initConfig } = await import('./config.js'); await initConfig(env) } catch {}
+        await tgAnswerCallbackQuery(env, cqId, 'Umur topik: ' + n + ' hari', false)
+      } else {
+        await tgAnswerCallbackQuery(env, cqId, 'Nilai tidak valid', true)
+      }
+      cfg = await readJSON(env, 'BotConfig', {})
+    }
+    if (data === 'adm_ticket_keep_topic') {
+      cfg.ticketAutoDelTopic = cfg.ticketAutoDelTopic === false ? true : false
+      await writeJSON(env, 'BotConfig', cfg)
+      try { const { initConfig } = await import('./config.js'); await initConfig(env) } catch {}
+      await tgAnswerCallbackQuery(env, cqId, cfg.ticketAutoDelTopic ? 'Hapus otomatis: YA (10 mnt)' : 'Hapus otomatis: TIDAK', false)
+      cfg = await readJSON(env, 'BotConfig', {})
+    }
+    if (data === 'adm_ticket_keep_custom') {
+      await writeJSON(env, 'adminState_' + fromId, { action: 'settings_ticket_keep', cardMessageId: messageId })
+      await tgEditMessageText(env, chatId, messageId,
+        '*UMUR TOPIK TIKET*\n\nKetik angka *1-100* (hari).\n\n_Ketik /batal jika tidak jadi._',
+        { inline_keyboard: [[{ text: 'Batal', callback_data: 'adm_ticket_keep' }]] }, 'Markdown'
+      )
+      return
+    }
+    const keep2 = cfg.ticketKeepDays !== undefined ? cfg.ticketKeepDays : 7
+    const autoDel = cfg.ticketAutoDelTopic !== false
+    const warn = (keep2 < 7) ? '\n\nUmur < 7 hari: tiket bisa terhapus sebelum window reopen 7 hari habis.' : ''
+    const statusLine = autoDel ? 'Status hapus otomatis: *AKTIF (10 mnt)*' : 'Status hapus otomatis: *NONAKTIF*'
+    const explain = '\n\nUmur ' + keep2 + ' hari = arsip tiket di database.\nHapus otomatis ' + (autoDel ? 'YA = topik forum hilang 10 mnt setelah tiket ditutup (user/admin sama).' : 'TIDAK = topik forum tidak dihapus otomatis.') + warn
+    const rows = [
+      [{ text: '1 hari', callback_data: 'adm_ticket_keep_1' }, { text: '3 hari', callback_data: 'adm_ticket_keep_3' }, { text: '7 hari', callback_data: 'adm_ticket_keep_7' }],
+      [{ text: '14 hari', callback_data: 'adm_ticket_keep_14' }, { text: '30 hari', callback_data: 'adm_ticket_keep_30' }, { text: '100 hari', callback_data: 'adm_ticket_keep_100' }],
+      [{ text: 'Ketik angka (1-100)', callback_data: 'adm_ticket_keep_custom' }],
+      [{ text: 'Hapus otomatis saat closed: ' + (autoDel ? 'YA (10 mnt)' : 'TIDAK'), callback_data: 'adm_ticket_keep_topic' }],
+      [{ text: 'Kembali ke Channel & Log', callback_data: 'adm_setfolder_channel' }]
+    ]
+    await tgEditMessageText(env, chatId, messageId,
+      '*UMUR TOPIK TIKET*\n\nTiket selesai disimpan: *' + keep2 + ' hari*\n' + statusLine + explain,
+      { inline_keyboard: rows }, 'Markdown'
+    )
+    return
+  }
+
   if (data === 'adm_set_channel_ticket') {
     const cfg = await readJSON(env, 'BotConfig', {})
     const cur = cfg.channelTicket || '-'
@@ -3421,6 +3490,7 @@ export async function handleAdminCallback(env, cq) {
 
     const t = tickets[idx]
     // F2 CF: Undo kedaluwarsa 5 detik dari sekarang.
+    t.deleteTopicAt = Date.now() + 10 * 60 * 1000
     await writeJSON(env, 'TicketUndo_' + tkId, Date.now())
     const { renderTicketCard: rtcClose } = await import('./ticketCard.js')
     const closeCard = rtcClose(t, { role: 'admin', viewerId: fromId })
@@ -3479,6 +3549,8 @@ export async function handleAdminCallback(env, cq) {
       return
     }
     await deleteKey(env, 'TicketUndo_' + tkId)
+    const { ensureTopicAlive: etaUndo } = await import('./ticket.js')
+    await etaUndo(env, tickets[idx])
     tickets[idx].status = 'answered'
     tickets[idx].closedAt = null
     tickets[idx].deleteTopicAt = null
@@ -3728,6 +3800,7 @@ export async function handleAdminCallback(env, cq) {
           [{ text: '🔔 Kelola Notifikasi Transaksi', callback_data: 'adm_notif' }],
           [{ text: '📢 Setting Channel Log Transaksi', callback_data: 'adm_set_channel_log_tx' }],
           [{ text: '🎫 Setting Log Tiket (Grup/Ch)', callback_data: 'adm_set_channel_ticket' }],
+          [{ text: 'Umur Topik Tiket', callback_data: 'adm_ticket_keep' }],
           [{ text: '💾 Setting Channel Backup DB', callback_data: 'adm_set_channel_backup' }],
           [{ text: '🔙 Kembali ke Settings', callback_data: 'adm_settings' }]
         ]

@@ -45,29 +45,50 @@ async function cleanupClosedTickets(env) {
   try {
     const tickets = await readJSON(env, 'Tickets', [])
     if (tickets.length === 0) return
-    
+
+    // P7: umur simpan dari setting admin (1-100 hari, default 7).
+    let keepDays = 7
+    let autoDel = true
+    try {
+      const cfg = await readJSON(env, 'BotConfig', null)
+      if (cfg) {
+        const kd = parseInt(cfg.ticketKeepDays, 10)
+        if (Number.isFinite(kd) && kd >= 1 && kd <= 100) keepDays = kd
+        if (cfg.ticketAutoDelTopic === false) autoDel = false
+      }
+    } catch {}
     const now = Date.now()
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000
+    const keepMs = keepDays * 24 * 60 * 60 * 1000
     let changed = false
-    
-    const activeTickets = tickets.filter(t => {
+
+    const activeTickets = []
+    for (const t of tickets) {
       if (t.status === 'closed') {
         if (t.closedAt) {
           const age = now - t.closedAt
-          if (age >= sevenDaysMs) {
+          if (age >= keepMs) {
             changed = true
-            return false // Delete it
+            if (autoDel && t.logChatId && t.threadId) {
+              try {
+                const { tgDeleteForumTopic } = await import('./telegram.js')
+                await tgDeleteForumTopic(env, t.logChatId, t.threadId)
+              } catch (e) {
+                console.error('cleanupClosedTickets delTopic: ' + e.message)
+              }
+            }
+            continue // Delete it
           }
-          return true
+          activeTickets.push(t)
+        } else {
+          t.closedAt = now
+          changed = true
+          activeTickets.push(t)
         }
-        // Initialize closedAt for old tickets so they get deleted in 7 days
-        t.closedAt = now
-        changed = true
-        return true
+      } else {
+        activeTickets.push(t)
       }
-      return true
-    })
-    
+    }
+
     if (changed) {
       await writeJSON(env, 'Tickets', activeTickets)
     }

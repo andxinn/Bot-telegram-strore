@@ -1358,22 +1358,12 @@ async function showLeaderboard(env, chatId, fromId, fromUsername = '') {
   }
 }
 
+// P8: menu 1 pintu — daftar tiket user + 1 tombol Buat Tiket (via renderer).
 async function showTicketMenu(env, chatId, fromId) {
-  let cap = '╭───〔 🎫 TIKET BANTUAN 〕───\n'
-  cap += '┊ Punya masalah atau butuh bantuan?\n'
-  cap += '┊ Silakan buat tiket baru atau cek\n'
-  cap += '┊ daftar tiket aktif Anda di bawah.\n'
-  cap += '╰──────────────────\n\n'
-  cap += ' Pilih opsi di bawah:'
-  
-  const kb = {
-    inline_keyboard: [
-      [{ text: '➕ Buat Tiket Baru', callback_data: 'tk_create' }],
-      [{ text: '📋 Daftar Tiket Saya', callback_data: 'tk_list' }],
-      [{ text: '🔙 Kembali ke Menu Utama', callback_data: 'to_menu' }]
-    ]
-  }
-  await sendTextCard(env, chatId, cap, kb, fromId)
+  const { renderUserTicketList } = await import('./ticketCard.js')
+  const all = await readJSON(env, 'Tickets', [])
+  const v = renderUserTicketList(all, fromId)
+  await sendTextCard(env, chatId, v.text, v.keyboard, fromId, 'HTML')
 }
 
 async function handleTicketState(env, msg, state) {

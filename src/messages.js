@@ -365,6 +365,21 @@ async function handleMessage(env, msg) {
     return
   }
 
+  // P2: auto-route pesan user ke satu-satunya tiket aktif (F1 STB).
+  // Dipasang SETELAH semua tombol menu/state, SEBELUM fallback sapaan.
+  if (msg.chat.type === 'private') {
+    try {
+      const tm = await import('./ticket.js')
+      const routed = await tm.userAppendToTicket(env, msg)
+      if (routed) {
+        const last = (routed.messages || [])[routed.messages.length - 1] || {}
+        await tm.forwardUserToForum(env, routed, { textVal: last.text || '', photoFileId: last.photoFileId || null, docFileId: last.docFileId || null, jamHM: last.time || '' })
+        await tgSendMessage(env, chatId, '✓ Masuk ke tiket `' + routed.ticketId + '`\n💬 Balas langsung di sini — ketik saja, otomatis lanjut ke admin.', getMainMenuKeyboard(), 'Markdown')
+        return
+      }
+    } catch (e) { console.error('[ticket auto-route]', e.message) }
+  }
+
   const fbUser = await getUser(env, chatId) || await addUser(env, chatId, fromName)
   const mainKbFb = getMainMenuKeyboard()
   await tgSendMessage(env, chatId, 'Halo Kak *' + mdSafe(fbUser.name) + '*' + ' 😊\n\nSilakan pilih menu:', mainKbFb, 'Markdown')

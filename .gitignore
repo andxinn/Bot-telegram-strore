@@ -22,3 +22,6 @@ backup/
 # Misc
 *.log
 .DS_Store
+
+# Dev polling offset (lokal, jangan commit)
+dev-offset.json

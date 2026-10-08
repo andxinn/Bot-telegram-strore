@@ -235,16 +235,24 @@ export default {
   async scheduled(event, env, ctx) {
     await initDb(env)
     await initConfig(env)
-    if (event.cron === '* * * * *') {
-      ctx.waitUntil(checkPendingPayments(env))
-      ctx.waitUntil((async () => { try { const { flushTicketSla } = await import('./ticket.js'); await flushTicketSla(env) } catch (e) { console.error('[cron ticketsla]', e.message) } })())
-      ctx.waitUntil((async () => { try { const { flushTopicDelete } = await import('./ticket.js'); await flushTopicDelete(env) } catch (e) { console.error('[cron topicdel]', e.message) } })())
-      ctx.waitUntil(flushStokBaruNotif(env).catch(e => console.error('[cron stoknotif]', e.message)))
-    } else if (event.cron === '0 * * * *') {
-      const wibHour = (new Date().getUTCHours() + 7) % 24
-      const wantHour = Number((await readJSON(env, 'BotConfig', {}).catch(() => ({}))).JamBackup ?? JamBackup ?? env.JAM_BACKUP ?? 6)
-      if (wibHour === wantHour) ctx.waitUntil(autoBackup(env))
-      ctx.waitUntil(cleanupClosedTickets(env))
-    }
+    // ponytail: free plan max 5 cron/akun → 1 cron "* * * * *" saja; tugas jam-an di-gate WIB + guard 1x/hari.
+    // Upgrade ke 2 cron ("* * * * *","0 * * * *") di wrangler.toml bila akun Paid.
+    ctx.waitUntil(checkPendingPayments(env))
+    ctx.waitUntil((async () => { try { const { flushTicketSla } = await import('./ticket.js'); await flushTicketSla(env) } catch (e) { console.error('[cron ticketsla]', e.message) } })())
+    ctx.waitUntil((async () => { try { const { flushTopicDelete } = await import('./ticket.js'); await flushTopicDelete(env) } catch (e) { console.error('[cron topicdel]', e.message) } })())
+    ctx.waitUntil(flushStokBaruNotif(env).catch(e => console.error('[cron stoknotif]', e.message)))
+    ctx.waitUntil((async () => {
+      try {
+        const wibHour = (new Date().getUTCHours() + 7) % 24
+        const wantHour = Number((await readJSON(env, 'BotConfig', {}).catch(() => ({}))).JamBackup ?? JamBackup ?? env.JAM_BACKUP ?? 6)
+        if (wibHour !== wantHour) return
+        const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10)
+        const flag = 'backupDone_' + today
+        if (await readJSON(env, flag, null).catch(() => null)) return
+        await autoBackup(env)
+        await writeJSON(env, flag, { at: Date.now() })
+      } catch (e) { console.error('[cron backup]', e.message) }
+    })())
+    ctx.waitUntil(cleanupClosedTickets(env).catch(e => console.error('[cron ticketsweep]', e.message)))
   }
 }

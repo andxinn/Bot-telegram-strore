@@ -23,7 +23,10 @@ JAM_BACKUP = "6"
 # Lalu paste id yang keluar ke bawah ini.
 [[kv_namespaces]]
 binding = "DB"
-id = "your-kv-namespace-id"
+id = "67a13585247a4fc68be71470581efcc9"
 
 [triggers]
-crons = ["* * * * *", "0 * * * *"]
+# ponytail: 1 cron saja (free plan max 5 cron/akun, 4 sudah dipakai worker lain).
+# Tugas jam-an (backup/cleanup) di-gate di dalam scheduled handler src/index.js.
+# Kembalikan ke ["* * * * *", "0 * * * *"] bila akun Paid.
+crons = ["* * * * *"]

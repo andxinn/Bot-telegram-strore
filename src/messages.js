@@ -46,15 +46,15 @@ async function handleMessage(env, msg) {
           if (photoFileId) msgObj.photoFileId = photoFileId
           if (docFileId) { msgObj.docFileId = docFileId; msgObj.docName = docName }
 
-          tk.messages.push(msgObj)
-          tk.status = 'answered'
-          tk.lastAdminAt = Date.now()
-          await writeJSON(env, 'Tickets', tickets)
+          // F1: satu jalur tulis — bukan push langsung (PRD-TIKET 3.2.1).
+          const { appendTicketMessage } = await import('./ticket.js')
+          const t = await appendTicketMessage(env, tk.ticketId, msgObj, { by: 'admin' })
+          if (!t) return
 
           // Teruskan ke user: kartu penuh via renderer tunggal.
           const { renderTicketCard: rtcFwd } = await import('./ticketCard.js')
-          const fwdCard = rtcFwd(tk, { role: 'user' })
-          const userChatId = tk.userId
+          const fwdCard = rtcFwd(t, { role: 'user' })
+          const userChatId = t.userId
           let userMsg = '🔔 <b>Tanggapan Admin Baru!</b>\n\n' + fwdCard.text
           const kb = fwdCard.keyboard
 
@@ -78,11 +78,11 @@ async function handleMessage(env, msg) {
           // Update label topik
           try {
             const { renderTicketCard: rtcForum } = await import('./ticketCard.js')
-            const fcard = rtcForum(tk, { role: 'admin', viewerId: msg.from.id })
+            const fcard = rtcForum(t, { role: 'admin', viewerId: msg.from.id })
             const newLogText = fcard.text
             const newLogKb = fcard.keyboard
-            if (tk.logChatId && tk.logMessageId) {
-              await tgEditMessageText(env, tk.logChatId, tk.logMessageId, newLogText, newLogKb, 'HTML')
+            if (t.logChatId && t.logMessageId) {
+              await tgEditMessageText(env, t.logChatId, t.logMessageId, newLogText, newLogKb, 'HTML')
             }
           } catch (e) { console.error('[forum admin reply update log]', e.message) }
           return

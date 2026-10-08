@@ -74,34 +74,10 @@ async function handleCallbackQuery(env, cq) {
   }
 
   if (data === 'tk_list') {
-    await tgAnswerCallbackQuery(env, cqId, '📋 Membuka daftar tiket Anda', false)
-    const tickets = await readJSON(env, 'Tickets', [])
-    const myTickets = tickets.filter(t => String(t.userId) === String(fromId))
-    if (myTickets.length === 0) {
-      await editCard(env, cq, '📭 Anda belum memiliki tiket laporan bantuan.', {
-        inline_keyboard: [
-          [{ text: '➕ Buat Tiket Baru', callback_data: 'tk_create' }],
-          [{ text: '🔙 Menu Tiket', callback_data: 'tk_back_menu' }]
-        ]
-      })
-      return
-    }
-
-    let cap = '╭───〔 📋 DAFTAR TIKET SAYA 〕───\n'
-    cap += '┊ Berikut adalah riwayat tiket Anda.\n'
-    cap += '┊ Klik salah satu tiket untuk detail.\n'
-    cap += '╰──────────────────\n'
-
-    const rows = []
-    for (const t of myTickets.slice(0, 15)) {
-      const stStyle = t.status === 'closed' ? 'success' : 'primary'
-      const label = (t.status === 'closed' ? '🟢 ' : (t.status === 'answered' ? '🔵 [Balasan] ' : '🟡 ')) + t.ticketId
-      rows.push([{ text: label, callback_data: 'tk_view_' + t.ticketId, style: stStyle }])
-    }
-    rows.push([{ text: '➕ Buat Tiket Baru', callback_data: 'tk_create' }])
-    rows.push([{ text: '🔙 Menu Tiket', callback_data: 'tk_back_menu' }])
-
-    await editCard(env, cq, cap, { inline_keyboard: rows })
+    await tgAnswerCallbackQuery(env, cqId, 'Membuka daftar tiket Anda', false)
+    const { renderUserTicketList } = await import('./ticketCard.js')
+    const v = renderUserTicketList(await readJSON(env, 'Tickets', []), fromId)
+    await editCard(env, cq, v.text, v.keyboard, 'HTML')
     return
   }
 
@@ -297,21 +273,10 @@ async function handleCallbackQuery(env, cq) {
   }
 
   if (data === 'tk_back_menu') {
-    await tgAnswerCallbackQuery(env, cqId, '🔙 Kembali ke menu tiket', false)
-    let cap = '╭───〔 🎫 TIKET BANTUAN 〕───\n'
-    cap += '┊ Punya masalah atau butuh bantuan?\n'
-    cap += '┊ Silakan buat tiket baru atau cek\n'
-    cap += '┊ daftar tiket aktif Anda di bawah.\n'
-    cap += '╰──────────────────\n\n'
-    cap += 'Pilih opsi di bawah 👇:'
-    const kb = {
-      inline_keyboard: [
-        [{ text: '➕ Buat Tiket Baru', callback_data: 'tk_create' }],
-        [{ text: '📋 Daftar Tiket Saya', callback_data: 'tk_list' }],
-        [{ text: '🔙 Kembali ke Menu Utama', callback_data: 'to_menu' }]
-      ]
-    }
-    await editCard(env, cq, cap, kb)
+    await tgAnswerCallbackQuery(env, cqId, 'Kembali ke tiket', false)
+    const { renderUserTicketList } = await import('./ticketCard.js')
+    const v = renderUserTicketList(await readJSON(env, 'Tickets', []), fromId)
+    await editCard(env, cq, v.text, v.keyboard, 'HTML')
     return
   }
 

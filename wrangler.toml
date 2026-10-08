@@ -26,4 +26,5 @@ binding = "DB"
 id = "67a13585247a4fc68be71470581efcc9"
 
 [triggers]
-crons = ["* * * * *", "0 * * * *", "*/30 * * * *"]
+# Free plan: maks 5 cron trigger per AKUN — worker ini pakai 1 saja (sisanya dijadwal di tick menit src/index.js).
+crons = ["* * * * *"]

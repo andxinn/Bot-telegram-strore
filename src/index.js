@@ -241,6 +241,17 @@ export default {
       ctx.waitUntil((async () => { try { const { flushTopicDelete } = await import('./ticket.js'); await flushTopicDelete(env) } catch (e) { console.error('[cron topicdel]', e.message) } })())
       ctx.waitUntil((async () => { try { const { flushBcStates } = await import('./admin.js'); await flushBcStates(env) } catch (e) { console.error('[cron bc]', e.message) } })())
       ctx.waitUntil(flushStokBaruNotif(env).catch(e => console.error('[cron stoknotif]', e.message)))
+      // Single-trigger scheduling (Free plan: 1 cron): cleanup per jam + backup ikut tick menit.
+      try {
+        const nowD = new Date()
+        const wibH = (nowD.getUTCHours() + 7) % 24
+        const min = nowD.getUTCMinutes()
+        if (min === 0) ctx.waitUntil(cleanupClosedTickets(env))
+        const _bc2 = await readJSON(env, 'BotConfig', {}).catch(() => ({}))
+        const mode2 = (_bc2 && _bc2.backupMode) || 'daily'
+        const want2 = Number((_bc2 && _bc2.JamBackup) ?? JamBackup ?? env.JAM_BACKUP ?? 6)
+        if ((mode2 !== '30m' && min === 0 && wibH === want2) || (mode2 === '30m' && min % 30 === 0)) ctx.waitUntil(autoBackup(env))
+      } catch (e) { console.error('[cron sched]', e.message) }
     } else if (event.cron === '0 * * * *' || event.cron === 'backup30m' || event.cron === '*/30 * * * *') {
       const wibHour = (new Date().getUTCHours() + 7) % 24
       const _bc = await readJSON(env, 'BotConfig', {}).catch(() => ({}))

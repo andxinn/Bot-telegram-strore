@@ -323,10 +323,31 @@ export async function bcStart(env, tag, targets, payload) {
   return await bcFlush(env, stateKey)
 }
 
-// Ambil banner Flash Sale dari BotConfig
-async function fsGetBanner(env, key) {
+// Simpan banner dari foto langsung (file_id ringan) ATAU fallback base64 teks.
+// returns 'photo' | 'b64' | null. Foto: simpan file_id + hapus base64 lama.
+async function saveBannerFromMsg(env, msg, text, cfg, idKey, b64key) {
+  if (msg.photo && msg.photo.length > 0) {
+    cfg[idKey] = msg.photo[msg.photo.length - 1].file_id
+    delete cfg[b64key]
+    await writeJSON(env, 'BotConfig', cfg)
+    try { await initConfig(env) } catch {}
+    return 'photo'
+  }
+  const b64 = (text || '').trim().replace(/^data:image\/[a-z]+;base64,/i, '')
+  if (!/^[A-Za-z0-9+/=]+$/.test(b64) || b64.length < 100) return null
+  cfg[b64key] = b64
+  await writeJSON(env, 'BotConfig', cfg)
+  try { await initConfig(env) } catch {}
+  return 'b64'
+}
+
+// Ambil banner dari BotConfig -> { id, b64 } | null
+async function fsGetBanner(env, b64key, idKey) {
   const cfg = await readJSON(env, 'BotConfig', {})
-  return cfg[key] || null
+  const b64 = cfg[b64key] || null
+  const id = idKey ? (cfg[idKey] || null) : null
+  if (!b64 && !id) return null
+  return { id, b64 }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -701,8 +722,10 @@ async function bcStokPanel(env, chatId, messageId, page) {
 // ponytail: user yang sudah blokir bot (403) di-skip, tidak bisa dipaksa kirim.
 const STOK_NOTIF_CHUNK = 500
 
-async function stokSendOne(env, sendMsg, sendPhoto, bcImg, uid, msg) {
-  if (bcImg) return await sendPhoto(env, uid, bcImg, msg, null, 'Markdown')
+async function stokSendOne(env, sendMsg, sendPhotoB64, sendPhotoId, bcImg, uid, msg) {
+  const bn = (bcImg && typeof bcImg === 'object') ? bcImg : (bcImg ? { id: null, b64: bcImg } : null)
+  if (bn && bn.id) { try { const r = await sendPhotoId(env, uid, bn.id, msg, null, 'Markdown'); if (r && r.ok) return r } catch (e) {} }
+  if (bn && bn.b64) return await sendPhotoB64(env, uid, bn.b64, msg, null, 'Markdown')
   return await sendMsg(env, uid, msg, null, 'Markdown')
 }
 
@@ -738,15 +761,15 @@ export async function flushStokBaruNotif(env) {
       st = { msg, targets, idx: 0, sent: 0, retry429: [], snapshot: [{ id: first.id }] }
     }
 
-    const { tgSendMessage: sendMsg, tgSendPhotoBase64: sendPhoto } = await import('./telegram.js')
+    const { tgSendMessage: sendMsg, tgSendPhotoBase64: sendPhotoB64, tgSendPhoto: sendPhotoId } = await import('./telegram.js')
     const { safeBatchSend: sbs } = await import('./helpers.js')
-    const bcImg = cfg.stokBcImg || null
+    const bcImg = (cfg.stokBcId || cfg.stokBcImg) ? { id: cfg.stokBcId || null, b64: cfg.stokBcImg || null } : null
     // Tick ini: kirim chunk dari idx, ditambah retry user 429 dari tick sebelumnya.
     // Q1: via safeBatchSend (±15/dtk, 429 tunggu penuh, stop 5x beruntun).
     const freshStart = st.idx
     const freshEnd = Math.min(st.idx + STOK_NOTIF_CHUNK, st.targets.length)
     const todo = st.retry429.concat(st.targets.slice(freshStart, freshEnd))
-    const r = await sbs(todo, (uid) => stokSendOne(env, sendMsg, sendPhoto, bcImg, uid, st.msg))
+    const r = await sbs(todo, (uid) => stokSendOne(env, sendMsg, sendPhotoB64, sendPhotoId, bcImg, uid, st.msg))
     const chunkOk = r.sent
     const hardFail = r.failed
     const failed429 = r.rest
@@ -955,59 +978,55 @@ export async function handleAdminState(env, msg, state) {
     return
   }
 
-  // ══ SETTINGS: banner Flash Sale (base64 upload via txt) ══
+  // ══ SETTINGS: banner Flash Sale (foto langsung / base64 via txt) ══
   if (state.action === 'settings_fs_banner') {
-    const b64 = text.trim().replace(/^data:image\/[a-z]+;base64,/i, '')
-    if (!/^[A-Za-z0-9+/=]+$/.test(b64) || b64.length < 100) {
+    const cfgB = await readJSON(env, 'BotConfig', {})
+    const saved = await saveBannerFromMsg(env, msg, text, cfgB, 'bannerFsId', 'bannerFsB64')
+    if (!saved) {
       if (state.cardMessageId) {
         await tgEditMessageText(env, chatId, state.cardMessageId,
-          '*🔥 Banner Flash Sale*\n\n⚠️ *Isi tidak terlihat seperti base64 gambar valid.* Coba lagi:\n\nKirim file *.txt* berisi *base64* gambar banner Flash Sale.\n\n_Ketik /batal jika tidak jadi._',
+          '*🔥 Banner Flash Sale*\n\n⚠️ *Kirim foto langsung atau base64 valid.* Coba lagi:\n\nKirim *foto* langsung, atau file *.txt* berisi *base64* gambar banner Flash Sale.\n\n_Ketik /batal jika tidak jadi._',
           { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_setfolder_media' }]] }, 'Markdown'
         )
       } else {
-        await tgSendMessage(env, chatId, '⚠️ Isi tidak terlihat seperti base64 gambar valid. Coba lagi.')
+        await tgSendMessage(env, chatId, '⚠️ Kirim foto langsung atau base64 gambar valid. Coba lagi.')
       }
       return
     }
-    const cfgB = await readJSON(env, 'BotConfig', {})
-    cfgB.bannerFsB64 = b64
-    await writeJSON(env, 'BotConfig', cfgB)
     await deleteKey(env, 'adminState_' + fromId)
     if (state.cardMessageId) {
       await tgEditMessageText(env, chatId, state.cardMessageId,
-        '✅ Banner Flash Sale disimpan (' + b64.length + ' chars).',
+        saved === 'photo' ? '✅ Banner Flash Sale disimpan (foto).' : '✅ Banner Flash Sale disimpan (base64).',
         { inline_keyboard: [[{ text: '🔙 Settings', callback_data: 'adm_setfolder_media' }]] }, 'Markdown'
       )
     } else {
       await tgSendMessage(env, chatId,
-        '✅ Banner Flash Sale disimpan (' + b64.length + ' chars). Preview akan muncul di broadcast berikutnya.',
+        saved === 'photo' ? '✅ Banner Flash Sale disimpan (foto). Preview akan muncul di broadcast berikutnya.' : '✅ Banner Flash Sale disimpan (base64). Preview akan muncul di broadcast berikutnya.',
         { inline_keyboard: [[{ text: '🔙 Settings', callback_data: 'adm_setfolder_media' }]] }, 'Markdown'
       )
     }
     return
   }
 
-  // ══ SETTINGS: banner Update Harga (base64 upload via txt) ══
+  // ══ SETTINGS: banner Update Harga (foto langsung / base64 via txt) ══
   if (state.action === 'settings_price_banner') {
-    const b64 = text.trim().replace(/^data:image\/[a-z]+;base64,/i, '')
-    if (!/^[A-Za-z0-9+/=]+$/.test(b64) || b64.length < 100) {
+    const cfgB = await readJSON(env, 'BotConfig', {})
+    const saved = await saveBannerFromMsg(env, msg, text, cfgB, 'bannerPriceId', 'bannerPriceB64')
+    if (!saved) {
       if (state.cardMessageId) {
         await tgEditMessageText(env, chatId, state.cardMessageId,
-          '*💰 Banner Update Harga*\n\n⚠️ *Isi tidak terlihat seperti base64 gambar valid.* Coba lagi:\n\nKirim file *.txt* berisi *base64* gambar banner Update Harga.',
+          '*💰 Banner Update Harga*\n\n⚠️ *Kirim foto langsung atau base64 valid.* Coba lagi:\n\nKirim *foto* langsung, atau file *.txt* berisi *base64* gambar banner Update Harga.',
           { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_setfolder_media' }]] }, 'Markdown'
         )
       } else {
-        await tgSendMessage(env, chatId, '⚠️ Isi tidak terlihat seperti base64 gambar valid. Coba lagi.')
+        await tgSendMessage(env, chatId, '⚠️ Kirim foto langsung atau base64 gambar valid. Coba lagi.')
       }
       return
     }
-    const cfgB = await readJSON(env, 'BotConfig', {})
-    cfgB.bannerPriceB64 = b64
-    await writeJSON(env, 'BotConfig', cfgB)
     await deleteKey(env, 'adminState_' + fromId)
     if (state.cardMessageId) {
       await tgEditMessageText(env, chatId, state.cardMessageId,
-        '✅ Banner Update Harga disimpan (' + b64.length + ' chars).',
+        saved === 'photo' ? '✅ Banner Update Harga disimpan (foto).' : '✅ Banner Update Harga disimpan (base64).',
         { inline_keyboard: [[{ text: '🔙 Settings', callback_data: 'adm_setfolder_media' }]] }, 'Markdown'
       )
     } else {
@@ -1399,60 +1418,43 @@ export async function handleAdminState(env, msg, state) {
     return
   }
   if (state.action === 'settings_banner_start') {
-    const b64 = text.trim()
-    if (b64.length < 100) { await tgSendMessage(env, chatId, '⚠️ String base64 terlalu pendek.'); return }
-    if (!/^[A-Za-z0-9+\/=]+$/.test(b64.replace(/^data:image\/\w+;base64,/, ''))) {
-      await tgSendMessage(env, chatId, '⚠️ Format base64 tidak valid.'); return
-    }
     const cfg = await readJSON(env, 'BotConfig', {})
-    cfg.bannerStartB64 = b64
-    await writeJSON(env, 'BotConfig', cfg)
+    const saved = await saveBannerFromMsg(env, msg, text, cfg, 'bannerStartId', 'bannerStartB64')
+    if (!saved) { await tgSendMessage(env, chatId, '⚠️ Kirim foto langsung atau string base64 valid.'); return }
     await deleteKey(env, 'adminState_' + fromId)
-    await tgSendMessage(env, chatId, '✅ Banner Start disimpan!', adminMainPanel(), 'Markdown')
+    await tgSendMessage(env, chatId, saved === 'photo' ? '✅ Banner Start disimpan (foto)!' : '✅ Banner Start disimpan!', adminMainPanel(), 'Markdown')
     return
   }
   if (state.action === 'settings_banner_list') {
-    const b64l = text.trim()
-    if (b64l.length < 100) { await tgSendMessage(env, chatId, '⚠️ String base64 terlalu pendek.'); return }
-    if (!/^[A-Za-z0-9+\/=]+$/.test(b64l.replace(/^data:image\/\w+;base64,/, ''))) {
-      await tgSendMessage(env, chatId, '⚠️ Format base64 tidak valid.'); return
-    }
     const cfg = await readJSON(env, 'BotConfig', {})
-    cfg.bannerListB64 = b64l
-    await writeJSON(env, 'BotConfig', cfg)
+    const saved = await saveBannerFromMsg(env, msg, text, cfg, 'bannerListId', 'bannerListB64')
+    if (!saved) { await tgSendMessage(env, chatId, '⚠️ Kirim foto langsung atau string base64 valid.'); return }
     await deleteKey(env, 'adminState_' + fromId)
-    await tgSendMessage(env, chatId, '✅ Banner List Produk disimpan!', adminMainPanel(), 'Markdown')
+    await tgSendMessage(env, chatId, saved === 'photo' ? '✅ Banner List Produk disimpan (foto)!' : '✅ Banner List Produk disimpan!', adminMainPanel(), 'Markdown')
     return
   }
   if (state.action === 'settings_bcstok_img') {
-    const b64s = text.trim()
-    if (b64s.length < 100) { await tgSendMessage(env, chatId, '⚠️ String base64 terlalu pendek.'); return }
-    if (!/^[A-Za-z0-9+\/=]+$/.test(b64s.replace(/^data:image\/\w+;base64,/, ''))) {
-      await tgSendMessage(env, chatId, '⚠️ Format base64 tidak valid.'); return
-    }
     const cfgb = await readJSON(env, 'BotConfig', {})
-    cfgb.stokBcImg = b64s
-    await writeJSON(env, 'BotConfig', cfgb)
+    const saved = await saveBannerFromMsg(env, msg, text, cfgb, 'stokBcId', 'stokBcImg')
+    if (!saved) { await tgSendMessage(env, chatId, '⚠️ Kirim foto langsung atau string base64 valid.'); return }
     await deleteKey(env, 'adminState_' + fromId)
-    await tgSendMessage(env, chatId, '✅ Gambar Broadcast Stok disimpan! Akan disertakan saat broadcast stok terbaru.', adminMainPanel(), 'Markdown')
+    await tgSendMessage(env, chatId, saved === 'photo' ? '✅ Gambar Broadcast Stok disimpan (foto)! Akan disertakan saat broadcast stok terbaru.' : '✅ Gambar Broadcast Stok disimpan! Akan disertakan saat broadcast stok terbaru.', adminMainPanel(), 'Markdown')
     return
   }
   if (state.action === 'settings_lb_banner') {
-    const b64lb = text.trim()
-    if (b64lb.length < 100 || !/^[A-Za-z0-9+\/=]+$/.test(b64lb.replace(/^data:image\/\w+;base64,/, ''))) {
+    const cfg = await readJSON(env, 'BotConfig', {})
+    const saved = await saveBannerFromMsg(env, msg, text, cfg, 'leaderboardId', 'leaderboardBanner')
+    if (!saved) {
       if (state.cardMessageId) {
         await tgEditMessageText(env, chatId, state.cardMessageId,
-          '*🖼️ UPLOAD BANNER LEADERBOARD*\n\nSilakan kirimkan string gambar base64 untuk banner Leaderboard.\n\n⚠️ *Format base64 tidak valid atau terlalu pendek.*',
-          { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_settings' }]] }, 'Markdown'
+          '*🖼️ UPLOAD BANNER LEADERBOARD*\n\nKirim *foto* langsung atau string gambar base64 untuk banner Leaderboard.\n\n⚠️ *Foto/base64 tidak valid.*',
+          { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_setfolder_fitur' }]] }, 'Markdown'
         )
       } else {
-        await tgSendMessage(env, chatId, '⚠️ Format base64 tidak valid atau terlalu pendek.')
+        await tgSendMessage(env, chatId, '⚠️ Kirim foto langsung atau base64 valid.')
       }
       return
     }
-    const cfg = await readJSON(env, 'BotConfig', {})
-    cfg.leaderboardBanner = b64lb
-    await writeJSON(env, 'BotConfig', cfg)
     await deleteKey(env, 'adminState_' + fromId)
     if (state.cardMessageId) {
       await tgEditMessageText(env, chatId, state.cardMessageId, '✅ Banner Leaderboard disimpan!', adminMainPanel(), 'Markdown')
@@ -2821,32 +2823,19 @@ export async function handleAdminCallback(env, cq) {
       if (!bcMsg) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Pesan kosong', true); return }
       const bcUsers = await readJSON(env, 'UserList', [])
       const bcCfg = await readJSON(env, 'BotConfig', {})
-      const bcImg = bcCfg.stokBcImg || null
+      const bcImgObj = (bcCfg.stokBcId || bcCfg.stokBcImg) ? { id: bcCfg.stokBcId || null, b64: bcCfg.stokBcImg || null } : null
+      const { tgSendPhotoBase64: sendBcB64, tgSendPhoto: sendBcId } = await import('./telegram.js')
+      const sendBcImg = (uid, msg) => bcImgObj && bcImgObj.id
+        ? sendBcId(env, uid, bcImgObj.id, msg, null, 'Markdown')
+        : (bcImgObj && bcImgObj.b64 ? sendBcB64(env, uid, bcImgObj.b64, msg, null, 'Markdown') : tgSendMessage(env, uid, msg, null, 'Markdown'))
       const banned = await readJSON(env, 'BannedUser', [])
       const banSet = new Set((banned || []).map(b => String(b.sender)))
       const targets = (bcUsers || []).map(u => u.chatId).filter(id => Number(id) > 0 && !banSet.has(String(id)))
       const snapIds = new Set(ikut.map(e => String(e.id)))
-      let bcSent = 0
-      for (let i = 0; i < targets.length; i += 25) {
-        const batch = targets.slice(i, i + 25)
-        const results = await Promise.allSettled(batch.map(async (uid) => {
-          try {
-            const r = bcImg
-              ? await tgSendPhotoBase64(env, uid, bcImg, bcMsg, null, 'Markdown')
-              : await tgSendMessage(env, uid, bcMsg, null, 'Markdown')
-            if (r && r.ok === false && r.error_code === 429 && r.parameters && r.parameters.retry_after) {
-              await new Promise(rr => setTimeout(rr, Math.min(Number(r.parameters.retry_after) || 1, 30) * 1000))
-              const r2 = bcImg
-                ? await tgSendPhotoBase64(env, uid, bcImg, bcMsg, null, 'Markdown')
-                : await tgSendMessage(env, uid, bcMsg, null, 'Markdown')
-              if (r2 && r2.ok === false) throw new Error('tg ' + r2.error_code)
-            } else if (r && r.ok === false) throw new Error('tg ' + r.error_code)
-            return true
-          } catch (e) { throw e }
-        }))
-        for (const r of results) { if (r.status === 'fulfilled') bcSent++ }
-        if ((i + 25) < targets.length) await sleep(800)
-      }
+      // Anti-banned via safeBatchSend (±15/dtk). Stop darurat → otomatis dilanjut cron.
+      const { safeBatchSend } = await import('./helpers.js')
+      const bcRes = await safeBatchSend(targets, (uid) => sendBcImg(uid, bcMsg))
+      const bcSent = bcRes.sent
       // Reset HANYA yang ikut snapshot — add baru tengah jalan tetap pending
       try {
         const curList = await readJSON(env, 'StokBaru', [])
@@ -3181,7 +3170,7 @@ export async function handleAdminCallback(env, cq) {
     const p = produk.find(pr => String(pr.id) === String(vid))
     const kategoriList = await readJSON(env, 'Kategori', [])
     const kat = p ? kategoriList.find(k => String(k.produkId) === String(p.category)) : null
-    const banner = await fsGetBanner(env, 'bannerFsB64')
+    const banner = await fsGetBanner(env, 'bannerFsB64', 'bannerFsId')
     const cap = await fsBuildBcCaption(env, fs, p ? p.nameproduct : fs.variantName, kat ? kat.produkName : null)
     const buyBtn = { text: '🛒 BELI SEKARANG (SALE)', callback_data: 'dpi_' + vid }
     // Q1: via bcStart resumable anti-banned (cron lanjutkan sisa).
@@ -3189,7 +3178,7 @@ export async function handleAdminCallback(env, cq) {
     const capObj = cap
     const res = await bcStart(env, 'fs_' + vid, targets, {
       text: (capObj && capObj.text) || capObj, mode: (capObj && capObj.parseMode) || 'HTML',
-      banner: banner ? { id: null, b64: banner } : null,
+      banner: banner || null,
       button: buyBtn,
     })
     if (res.reason === 'running') {
@@ -3239,14 +3228,14 @@ export async function handleAdminCallback(env, cq) {
     await tgAnswerCallbackQuery(env, cqId, '📢 Broadcast dimulai...')
     const kategoriList = await readJSON(env, 'Kategori', [])
     const kat = kategoriList.find(k => String(k.produkId) === String(p.category))
-    const banner = await fsGetBanner(env, 'bannerPriceB64')
+    const banner = await fsGetBanner(env, 'bannerPriceB64', 'bannerPriceId')
     const cap = fsBuildBcPriceCaption(p.nameproduct, kat ? kat.produkName : null, chg.oldPrice, chg.newPrice)
     const buyBtn = { text: '🛒 Lihat Produk', callback_data: 'dpi_' + vid }
     // Q1: via bcStart (tuntas → bcFinish hapus PriceChangeLog + tandai).
     const targets = (await readJSON(env, 'UserList', [])).map(u => u.chatId).filter(id => Number(id) > 0)
     const res = await bcStart(env, 'harga_' + vid, targets, {
       text: cap, mode: 'Markdown',
-      banner: banner ? { id: null, b64: banner } : null,
+      banner: banner || null,
       button: buyBtn,
     })
     if (res.reason === 'running') {
@@ -3288,6 +3277,7 @@ export async function handleAdminCallback(env, cq) {
   if (data === 'adm_del_fs_banner') {
     const cfgB = await readJSON(env, 'BotConfig', {})
     delete cfgB.bannerFsB64
+    delete cfgB.bannerFsId
     await writeJSON(env, 'BotConfig', cfgB)
     await tgAnswerCallbackQuery(env, cqId, '✅ Banner Flash Sale dihapus')
     await tgEditMessageText(env, chatId, messageId,
@@ -3298,11 +3288,11 @@ export async function handleAdminCallback(env, cq) {
   }
   if (data === 'adm_set_fs_banner') {
     const cfgB = await readJSON(env, 'BotConfig', {})
-    const has = !!cfgB.bannerFsB64
+    const has = !!(cfgB.bannerFsId || cfgB.bannerFsB64)
     await writeJSON(env, 'adminState_' + fromId, { action: 'settings_fs_banner', cardMessageId: messageId })
     let cap = '*🔥 Banner Flash Sale*\n\n'
     cap += 'Status: ' + (has ? '✅ sudah diset' : '❌ belum diset') + '\n\n'
-    cap += 'Kirim file *.txt* berisi *base64* gambar banner Flash Sale.\n'
+    cap += 'Kirim *foto* langsung, atau file *.txt* berisi *base64* gambar banner Flash Sale.\n'
     cap += '_(Recommended: 1200x600 landscape, tema merah/oranye, format PNG/JPG di-encode base64)_\n\n'
     cap += 'Banner ini akan dipakai sebagai header broadcast Flash Sale.'
     const kb = has
@@ -3316,6 +3306,7 @@ export async function handleAdminCallback(env, cq) {
   if (data === 'adm_del_price_banner') {
     const cfgB = await readJSON(env, 'BotConfig', {})
     delete cfgB.bannerPriceB64
+    delete cfgB.bannerPriceId
     await writeJSON(env, 'BotConfig', cfgB)
     await tgAnswerCallbackQuery(env, cqId, '✅ Banner Update Harga dihapus')
     await tgEditMessageText(env, chatId, messageId,
@@ -3326,11 +3317,11 @@ export async function handleAdminCallback(env, cq) {
   }
   if (data === 'adm_set_price_banner') {
     const cfgB = await readJSON(env, 'BotConfig', {})
-    const has = !!cfgB.bannerPriceB64
+    const has = !!(cfgB.bannerPriceId || cfgB.bannerPriceB64)
     await writeJSON(env, 'adminState_' + fromId, { action: 'settings_price_banner', cardMessageId: messageId })
     let cap = '*💰 Banner Update Harga*\n\n'
     cap += 'Status: ' + (has ? '✅ sudah diset' : '❌ belum diset') + '\n\n'
-    cap += 'Kirim file *.txt* berisi *base64* gambar banner Update Harga.\n'
+    cap += 'Kirim *foto* langsung, atau file *.txt* berisi *base64* gambar banner Update Harga.\n'
     cap += '_(Recommended: 1200x600 landscape, tema hijau/biru, format PNG/JPG di-encode base64)_\n\n'
     cap += 'Banner ini akan dipakai sebagai header broadcast "BC Harga Baru".'
     const kb = has
@@ -3359,13 +3350,13 @@ export async function handleAdminCallback(env, cq) {
 
   if (data === 'adm_set_lb_banner') {
     const cfg = await readJSON(env, 'BotConfig', {})
-    const lbHasBanner = !!(cfg.leaderboardBanner && cfg.leaderboardBanner.length > 50)
+    const lbHasBanner = !!((cfg.leaderboardId) || (cfg.leaderboardBanner && cfg.leaderboardBanner.length > 50))
     await writeJSON(env, 'adminState_' + fromId, { action: 'settings_lb_banner', cardMessageId: messageId })
     const kb = lbHasBanner
       ? { inline_keyboard: [[{ text: '🗑 Hapus Banner', callback_data: 'adm_del_lb_banner' }], [{ text: '🔙 Batal', callback_data: 'adm_settings' }]] }
       : { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_settings' }]] }
     await tgEditMessageText(env, chatId, messageId,
-      '*🖼️ UPLOAD BANNER LEADERBOARD*\n\nSilakan kirimkan string gambar base64 untuk banner Leaderboard.\n\n_Ketik /batal jika tidak jadi._',
+      '*🖼️ UPLOAD BANNER LEADERBOARD*\n\nKirim *foto* langsung atau string gambar base64 untuk banner Leaderboard.\n\n_Ketik /batal jika tidak jadi._',
       kb, 'Markdown'
     )
     return
@@ -3374,6 +3365,7 @@ export async function handleAdminCallback(env, cq) {
   if (data === 'adm_del_lb_banner') {
     const cfg = await readJSON(env, 'BotConfig', {})
     cfg.leaderboardBanner = ''
+    delete cfg.leaderboardId
     await writeJSON(env, 'BotConfig', cfg)
     data = 'adm_settings'
   }
@@ -3983,7 +3975,7 @@ export async function handleAdminCallback(env, cq) {
   if (data === 'adm_setfolder_fitur') {
     const cfg = await readJSON(env, 'BotConfig', {})
     const lbEnabled = cfg.leaderboardEnabled !== false
-    const lbHasBanner = !!(cfg.leaderboardBanner && cfg.leaderboardBanner.length > 50)
+    const lbHasBanner = !!((cfg.leaderboardId) || (cfg.leaderboardBanner && cfg.leaderboardBanner.length > 50))
     const stokNotif = cfg.stokAutoNotif !== false
     await tgEditMessageText(env, chatId, messageId,
       '*🏆 FITUR TAMBAHAN*\nPengaturan fitur-fitur opsional bot:',
@@ -4473,10 +4465,10 @@ export async function handleAdminCallback(env, cq) {
   }
   if (data === 'adm_set_bcstok_img') {
     const cfgimg = await readJSON(env, 'BotConfig', {})
-    const statusImg = cfgimg.stokBcImg ? '✅ Gambar sudah diset' : '❌ Belum ada gambar'
+    const statusImg = (cfgimg.stokBcId || cfgimg.stokBcImg) ? '✅ Gambar sudah diset' : '❌ Belum ada gambar'
     await writeJSON(env, 'adminState_' + fromId, { action: 'settings_bcstok_img' })
     await tgEditMessageText(env, chatId, messageId,
-      '*🖼️ Gambar Broadcast Stok*\nStatus: ' + statusImg + '\n\nKirim string base64 gambar untuk disertakan saat Broadcast Stok Terbaru.\n\n_Ketik /batal jika tidak jadi._',
+      '*🖼️ Gambar Broadcast Stok*\nStatus: ' + statusImg + '\n\nKirim *foto* langsung atau string base64 gambar untuk disertakan saat Broadcast Stok Terbaru.\n\n_Ketik /batal jika tidak jadi._',
       { inline_keyboard: [
         [{ text: '🗑️ Hapus Gambar', callback_data: 'adm_del_bcstok_img' }],
         [{ text: '🔙 Batal', callback_data: 'adm_settings' }]
@@ -4487,6 +4479,7 @@ export async function handleAdminCallback(env, cq) {
   if (data === 'adm_del_bcstok_img') {
     const cfgd = await readJSON(env, 'BotConfig', {})
     delete cfgd.stokBcImg
+    delete cfgd.stokBcId
     await writeJSON(env, 'BotConfig', cfgd)
     await deleteKey(env, 'adminState_' + fromId)
     await tgEditMessageText(env, chatId, messageId,
@@ -5004,7 +4997,7 @@ export async function handleAdminCallback(env, cq) {
   if (data === 'adm_set_banner_start') {
     await writeJSON(env, 'adminState_' + fromId, { action: 'settings_banner_start' })
     await tgEditMessageText(env, chatId, messageId,
-      '*🖼️ Banner Start (Base64)*\nKirim string base64 gambar.\nCara convert: base64.guru/converter/encode/image\n\n_Ketik /batal jika tidak jadi._',
+      '*🖼️ Banner Start*\nKirim *foto* langsung, atau string base64 gambar.\nCara convert: base64.guru/converter/encode/image\n\n_Ketik /batal jika tidak jadi._',
       { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_settings' }]] }, 'Markdown'
     )
     return
@@ -5012,7 +5005,7 @@ export async function handleAdminCallback(env, cq) {
   if (data === 'adm_set_banner_list') {
     await writeJSON(env, 'adminState_' + fromId, { action: 'settings_banner_list' })
     await tgEditMessageText(env, chatId, messageId,
-      '*🖼️ Banner List Produk (Base64)*\nKirim string base64 gambar untuk banner List Produk:\n\n_Ketik /batal jika tidak jadi._',
+      '*🖼️ Banner List Produk*\nKirim *foto* langsung, atau string base64 gambar untuk banner List Produk:\n\n_Ketik /batal jika tidak jadi._',
       { inline_keyboard: [[{ text: '🔙 Batal', callback_data: 'adm_settings' }]] }, 'Markdown'
     )
     return

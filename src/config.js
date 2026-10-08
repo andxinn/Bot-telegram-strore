@@ -17,7 +17,13 @@ let DevToken = ''
 let BannerFileId = ''
 let DataQris = ''
 let bannerStartB64 = ''
+let bannerStartId = ''
 let bannerListB64 = ''
+let bannerListId = ''
+let bannerFsId = ''
+let bannerPriceId = ''
+let leaderboardId = ''
+let stokBcId = ''
 let orderBotName = ''
 let caraOrderText = ''
 let leaderboardEnabled = true
@@ -66,7 +72,13 @@ async function initConfig(env) {
       if (kvConfig.BannerFileId) BannerFileId = kvConfig.BannerFileId
       if (kvConfig.ButtonMenu) ButtonMenu = kvConfig.ButtonMenu
       if (kvConfig.bannerStartB64 !== undefined) bannerStartB64 = kvConfig.bannerStartB64
+      if (kvConfig.bannerStartId !== undefined) bannerStartId = kvConfig.bannerStartId
       if (kvConfig.bannerListB64 !== undefined) bannerListB64 = kvConfig.bannerListB64
+      if (kvConfig.bannerListId !== undefined) bannerListId = kvConfig.bannerListId
+      if (kvConfig.bannerFsId !== undefined) bannerFsId = kvConfig.bannerFsId
+      if (kvConfig.bannerPriceId !== undefined) bannerPriceId = kvConfig.bannerPriceId
+      if (kvConfig.leaderboardId !== undefined) leaderboardId = kvConfig.leaderboardId
+      if (kvConfig.stokBcId !== undefined) stokBcId = kvConfig.stokBcId
       if (kvConfig.orderBotName) orderBotName = kvConfig.orderBotName
       if (kvConfig.caraOrderText) caraOrderText = kvConfig.caraOrderText
       if (kvConfig.leaderboardEnabled !== undefined) leaderboardEnabled = kvConfig.leaderboardEnabled
@@ -88,7 +100,7 @@ export {
   NamaBot, StoreName, OwnerID, OwnerUsername, ChannelLog, InvoiceLogger, channelBackup,
   ChannelStore, CS, JamBackup, Mode, SimulatePayment, SimulateDelay,
   WebhookSecret, DevToken, BannerFileId, DataQris,
-  bannerStartB64, bannerListB64, orderBotName, caraOrderText,
+  bannerStartB64, bannerStartId, bannerListB64, bannerListId, bannerFsId, bannerPriceId, leaderboardId, stokBcId, orderBotName, caraOrderText,
   ButtonMenu, initConfig, leaderboardEnabled, leaderboardBanner, channelTicket,
   ticketKeepDays, ticketAutoDelTopic
 }

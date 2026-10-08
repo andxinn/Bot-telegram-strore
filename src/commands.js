@@ -1,7 +1,7 @@
 import { showAdminPanel, recordStokBaru } from './admin.js'
-import { NamaBot, StoreName, OwnerID, OwnerUsername, ChannelLog, InvoiceLogger, ChannelStore, CS, Mode, SimulatePayment, SimulateDelay, ButtonMenu, BannerFileId, bannerStartB64, initConfig } from './config.js'
+import { NamaBot, StoreName, OwnerID, OwnerUsername, ChannelLog, InvoiceLogger, ChannelStore, CS, Mode, SimulatePayment, SimulateDelay, ButtonMenu, BannerFileId, bannerStartB64, bannerStartId, initConfig } from './config.js'
 import { readJSON, writeJSON, readText, writeText, deleteKey, existsKey } from './kv.js'
-import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendChatAction, tgSetMyCommands } from './telegram.js'
+import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgSendBanner, tgEditMessageText, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendChatAction, tgSetMyCommands } from './telegram.js'
 import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam, chunkArray, sleep, generateTrxId, boxFormat, nextId } from './helpers.js'
 import { getUserList, getUser, addUser, addSaldo, minSaldo, cekSaldo, isOwner, isRegistered, getRole, addRole, demoteRole, isBanned, addBan, delBan } from './user.js'
 import { getReplyKeyboard, getManagePanel } from './keyboard.js'
@@ -135,8 +135,13 @@ async function handleCommand(env, msg) {
       '╰──────────────────\n' +
       '\nSilakan pilih menu di bawah 👇'
     const keyboard = getReplyKeyboard(kategori)
-    if (bannerStartB64 && bannerStartB64.length > 50) {
-      await tgSendPhotoBase64(env, chatId, bannerStartB64, caption, keyboard)
+    // Banner start: file_id ringan dulu, fallback base64 legacy, lalu BannerFileId/teks
+    if ((bannerStartId && bannerStartId.length > 5) || (bannerStartB64 && bannerStartB64.length > 50)) {
+      const r = await tgSendBanner(env, chatId, bannerStartId, bannerStartB64, caption, keyboard)
+      if (!(r && r.ok)) {
+        if (BannerFileId && BannerFileId !== '-') await tgSendPhotoFile(env, chatId, BannerFileId, caption, keyboard)
+        else await tgSendMessage(env, chatId, caption, keyboard)
+      }
     } else if (BannerFileId && BannerFileId !== '-') {
       await tgSendPhotoFile(env, chatId, BannerFileId, caption, keyboard)
     } else {

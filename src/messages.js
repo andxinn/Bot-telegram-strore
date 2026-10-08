@@ -1,6 +1,6 @@
-import { NamaBot, OwnerID, ChannelLog, InvoiceLogger, SimulatePayment, ButtonMenu, BannerFileId, bannerListB64, orderBotName, caraOrderText, leaderboardEnabled, leaderboardBanner, channelTicket } from './config.js'
+import { NamaBot, OwnerID, ChannelLog, InvoiceLogger, SimulatePayment, ButtonMenu, BannerFileId, bannerListB64, bannerListId, orderBotName, caraOrderText, leaderboardEnabled, leaderboardBanner, leaderboardId, channelTicket } from './config.js'
 import { readJSON, writeJSON, readText, writeText, deleteKey, existsKey } from './kv.js'
-import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgSendDocument, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile, tgSetReaction, tgGetChat } from './telegram.js'
+import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgSendBanner, tgEditMessageText, tgDeleteMessage, tgSendDocument, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile, tgSetReaction, tgGetChat } from './telegram.js'
 import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getTanggalJam, sleep, generateTrxId, generateUniqueOrderId, expiredTime, loadingBar, generateTicketId, sansBold, stokLayakJual, varianKat, nextId } from './helpers.js'
 import { getUserList, getUser, addUser, addSaldo, cekSaldo, isOwner, getRole, isBanned } from './user.js'
 import { getMainMenuKeyboard, getProductNumberKeyboard } from './keyboard.js'
@@ -437,19 +437,21 @@ async function safeSendText(env, chatId, text, keyboard, parseMode = 'Markdown')
 // - Pakai banner foto bila ada DAN caption <= 1000 char (batas caption foto 1024)
 // - Kalau foto gagal / caption panjang / Markdown error -> fallback ke teks biasa
 // Dengan begini kartu TIDAK PERNAH macet di "10%".
-async function sendFinalCard(env, chatId, caption, keyboard, useBanner, customBannerB64 = null, parseMode = 'Markdown') {
+async function sendFinalCard(env, chatId, caption, keyboard, useBanner, customBannerB64 = null, parseMode = 'Markdown', customBannerId = null) {
   const activeBanner = customBannerB64 || bannerListB64
-  const hasBanner = (activeBanner && activeBanner.length > 50) || (BannerFileId && BannerFileId !== '-')
+  // custom eksplisit (mis. LB legacy): id hanya customBannerId, jangan bocor ke bannerListId
+  const activeBannerId = customBannerB64 ? (customBannerId || null) : (customBannerId || bannerListId || null)
+  const hasBanner = (activeBannerId && activeBannerId.length > 5) || (activeBanner && activeBanner.length > 50) || (BannerFileId && BannerFileId !== '-')
   if (useBanner && hasBanner && caption.length <= 1000) {
     let sent = null
     try {
-      if (activeBanner && activeBanner.length > 50) sent = await tgSendPhotoBase64(env, chatId, activeBanner, caption, keyboard, parseMode)
+      if (activeBannerId || (activeBanner && activeBanner.length > 50)) sent = await tgSendBanner(env, chatId, activeBannerId, activeBanner, caption, keyboard, parseMode)
       else sent = await tgSendPhotoFile(env, chatId, BannerFileId, caption, keyboard, parseMode)
     } catch (e) { sent = null }
     if (sent && sent.ok && sent.result && sent.result.message_id) return sent.result.message_id
     // Foto gagal (mis. Markdown) -> coba lagi tanpa Markdown
     try {
-      if (activeBanner && activeBanner.length > 50) sent = await tgSendPhotoBase64(env, chatId, activeBanner, caption, keyboard, '')
+      if (activeBannerId || (activeBanner && activeBanner.length > 50)) sent = await tgSendBanner(env, chatId, activeBannerId, activeBanner, caption, keyboard, '')
       else sent = await tgSendPhotoFile(env, chatId, BannerFileId, caption, keyboard, '')
     } catch (e) { sent = null }
     if (sent && sent.ok && sent.result && sent.result.message_id) return sent.result.message_id
@@ -462,7 +464,7 @@ async function sendFinalCard(env, chatId, caption, keyboard, useBanner, customBa
 // Loading ditampilkan sebagai PESAN TEKS (edit teks paling andal), lalu kartu
 // final dikirim sebagai pesan baru dan pesan loading dihapus. Tidak ada lagi
 // edit caption foto yang rapuh, jadi tidak pernah berhenti di "10%".
-async function sendCardWithLoading(env, chatId, caption, keyboard, useBanner, fromId, customBannerB64 = null, parseMode = 'Markdown') {
+async function sendCardWithLoading(env, chatId, caption, keyboard, useBanner, fromId, customBannerB64 = null, parseMode = 'Markdown', customBannerId = null) {
   // Single-card flow: hapus kartu flow sebelumnya agar pesan tidak menumpuk
   if (fromId) {
     const prev = await readJSON(env, 'flowMsg_' + fromId, null)
@@ -482,7 +484,7 @@ async function sendCardWithLoading(env, chatId, caption, keyboard, useBanner, fr
     }
   }
   // 3) Setelah loading 100%, kirim kartu final (foto + list produk) sebagai pesan baru
-  const finalMid = await sendFinalCard(env, chatId, caption, keyboard, useBanner, customBannerB64, parseMode)
+  const finalMid = await sendFinalCard(env, chatId, caption, keyboard, useBanner, customBannerB64, parseMode, customBannerId)
   // 4) Hapus pesan loading -> tinggal foto + list produk yang tampil
   if (loadingMid) { try { await tgDeleteMessage(env, chatId, loadingMid) } catch (e) {} }
   if (fromId && finalMid) await writeJSON(env, 'flowMsg_' + fromId, finalMid)
@@ -1350,9 +1352,10 @@ async function showLeaderboard(env, chatId, fromId, fromUsername = '') {
   cap += '╰──────────────────\n\n'
   cap += 'Silakan pilih menu di bawah '
 
-  const hasLbBanner = leaderboardBanner && leaderboardBanner.length > 50
+  const hasLbBanner = (leaderboardId && leaderboardId.length > 5) || (leaderboardBanner && leaderboardBanner.length > 50)
   if (hasLbBanner) {
-    await sendCardWithLoading(env, chatId, cap, getMainMenuKeyboard(), true, fromId, leaderboardBanner)
+    // leaderboardId (file_id ringan) bila ada; b64 legacy via customBannerB64
+    await sendCardWithLoading(env, chatId, cap, getMainMenuKeyboard(), true, fromId, leaderboardBanner && leaderboardBanner.length > 50 ? leaderboardBanner : null, 'Markdown', leaderboardId || null)
   } else {
     await sendTextCard(env, chatId, cap, getMainMenuKeyboard(), fromId)
   }

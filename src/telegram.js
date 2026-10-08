@@ -222,8 +222,21 @@ async function tgSetReaction(env, chatId, messageId, emoji = '🔥', isBig = tru
   } catch (e) { return null }
 }
 
+async function tgSendBanner(env, chatId, fileId, base64String, caption, keyboard = null, parseMode = 'Markdown') {
+  if (fileId && String(fileId).length > 5) {
+    try {
+      const r = await tgSendPhoto(env, chatId, fileId, caption, keyboard, parseMode)
+      if (r && r.ok) return r
+    } catch (e) {}
+  }
+  if (base64String && base64String.length > 50) {
+    return await tgSendPhotoBase64(env, chatId, base64String, caption, keyboard, parseMode)
+  }
+  return null
+}
+
 export {
-  tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgGetFile, tgDownloadFile, tgEditMessageText,
+  tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgSendBanner, tgGetFile, tgDownloadFile, tgEditMessageText,
   tgEditMessageMedia, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendDocumentFile,
   tgGetChat, tgSendChatAction, tgSetMyCommands, tgSendSticker, tgSetReaction,
   tgCreateForumTopic, tgCloseForumTopic, tgReopenForumTopic, tgDeleteForumTopic, tgEditForumTopic

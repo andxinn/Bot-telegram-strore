@@ -1,7 +1,7 @@
 import { NamaBot, OwnerID, ChannelLog, InvoiceLogger, SimulatePayment, ButtonMenu, BannerFileId, bannerListB64, orderBotName, caraOrderText, leaderboardEnabled, leaderboardBanner, channelTicket } from './config.js'
 import { readJSON, writeJSON, readText, writeText, deleteKey, existsKey } from './kv.js'
 import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgSendDocument, tgCreateForumTopic, tgReopenForumTopic, tgSendDocumentFile, tgSetReaction, tgGetChat } from './telegram.js'
-import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getTanggalJam, sleep, generateTrxId, generateUniqueOrderId, expiredTime, loadingBar, generateTicketId, sansBold } from './helpers.js'
+import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getTanggalJam, sleep, generateTrxId, generateUniqueOrderId, expiredTime, loadingBar, generateTicketId, sansBold, stokLayakJual, varianKat, nextId } from './helpers.js'
 import { getUserList, getUser, addUser, addSaldo, cekSaldo, isOwner, getRole, isBanned } from './user.js'
 import { getMainMenuKeyboard, getProductNumberKeyboard } from './keyboard.js'
 import { handleCommand } from './commands.js'
@@ -560,7 +560,7 @@ function buildVariantView(kat, variants, fsMap = {}, sold = 0) {
 
 function buildOrderView(os, p) {
   const htmlEsc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  const stock = p.stok ? p.stok.length : 0
+  const stock = stokLayakJual(p.stok).length
   const qty = os.jumlahPesanan
   // v9update18: use locked effective price from orderState (falls back to p.price)
   const effPrice = (os && os.price != null) ? Number(os.price) : (p.price || 0)
@@ -627,7 +627,7 @@ async function showVariants(env, chatId, kategoriId, fromId) {
     return
   }
   const produk = await readJSON(env, 'Produk', [])
-  const variants = produk.filter(p => p.category === kat.produkId)
+  const variants = varianKat(produk, kat)
   if (variants.length === 0) {
     await tgSendMessage(env, chatId, 'Belum ada varian untuk produk ini.')
     return
@@ -1109,7 +1109,7 @@ async function handleManageState(env, msg, state) {
     }
     if (step === 'desc') {
       state.data.desc = text === '-' ? '' : text
-      const newId = kategori.length > 0 ? Math.max(...kategori.map(k => k.id)) + 1 : 1
+      const newId = nextId(kategori)
       const produkId = state.data.nama.toLowerCase().replace(/\s+/g, '_') + '_' + newId
       kategori.push({ id: newId, produkName: state.data.nama, produkId, produkXuid: 'X' + String(newId).padStart(3, '0'), desc: state.data.desc })
       await writeJSON(env, 'Kategori', kategori)
@@ -1142,7 +1142,7 @@ async function handleManageState(env, msg, state) {
       const kategori = await readJSON(env, 'Kategori', [])
       const kat = kategori.find(k => k.id === parseInt(text))
       if (!kat) { await tgSendMessage(env, chatId, 'Nomor tidak valid.'); return }
-      const newId = produk.length > 0 ? Math.max(...produk.map(p => p.id)) + 1 : 1
+      const newId = nextId(produk)
       produk.push({ id: newId, nameproduct: state.data.nama, price: state.data.harga, category: kat.produkId, desc: '', stok: [] })
       await writeJSON(env, 'Produk', produk)
       await deleteKey(env, 'manageState_' + fromId)

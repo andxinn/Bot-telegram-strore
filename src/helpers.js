@@ -244,9 +244,36 @@ async function safeBatchSend(list, sendOne) {
   return { sent, failed, stopped429, rest: list.filter(u => !done.has(u)) }
 }
 
+// Q2: varian cocok 3 format (produkId | 'c'+id | id) — data lama campur.
+// Q2: stok layak jual — buang kadaluarsa (< hari ini WIB); null = tanpa expired.
+// Q2: ID numerik berikut — abaikan id non-numerik (Math.max mentah = NaN).
+function varianKat(produk, kat) {
+  if (!Array.isArray(produk) || !kat) return []
+  const pid = String((kat && kat.produkId) || '')
+  const cid = String((kat && kat.id) || '')
+  return produk.filter(p => {
+    const c = String((p && p.category) || '')
+    return c === pid || c === 'c' + cid || c === cid
+  })
+}
+function stokLayakJual(list) {
+  const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10)
+  if (!Array.isArray(list)) return []
+  return list.filter(s => !s || !s.expired_at || String(s.expired_at) >= today)
+}
+function nextId(list) {
+  let mx = 0
+  if (Array.isArray(list)) for (const x of list) {
+    const n = Number(x && x.id)
+    if (Number.isFinite(n) && n > mx) mx = Math.floor(n)
+  }
+  return mx + 1
+}
+
 export {
   escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam,
   chunkArray, sleep, toCRC16, generateTrxId, generateOrderId, generateKodeUnik, expiredTime, parseExpiredWIB,
   generateRandomPhone, generateRandomEmail, generateRandomDonationMessage, boxFormat, loadingBar, sansBold, escHtml,
-  generateTicketId, orderIdUnique, generateUniqueOrderId, safeBatchSend
+  generateTicketId, orderIdUnique, generateUniqueOrderId, safeBatchSend,
+  varianKat, stokLayakJual, nextId
 }

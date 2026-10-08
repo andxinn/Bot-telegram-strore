@@ -1,6 +1,6 @@
 import { readJSON, writeJSON, deleteKey } from './kv.js'
 import { tgSendMessage, tgSendPhotoBase64, tgEditMessageText as tgEditMessageTextRaw, tgAnswerCallbackQuery, tgSendDocument, tgGetFile, tgDownloadFile, tgDeleteMessage, tgCloseForumTopic, tgEditForumTopic } from './telegram.js'
-import { escapeMarkdown, ParseIdr, formatWIB, getDate, generateOrderId, sleep, getTanggalJam, mdSafe } from './helpers.js'
+import { escapeMarkdown, ParseIdr, formatWIB, getDate, generateOrderId, sleep, getTanggalJam, mdSafe, varianKat, nextId } from './helpers.js'
 import { isOwner, getRole, acquireLock, releaseLock } from './user.js'
 import { getPayCfg, savePayCfg, pakasirConfigured, PAYMENT_METHODS, methodLabel, feeLabel, pakasirCreate, pakasirCancel, defaultPayCfg } from './pakasir.js'
 import { duitkuConfigured, duitkuTest, DUITKU_QRIS_PROVIDERS, providerLabel } from './duitku.js'
@@ -1255,7 +1255,7 @@ export async function handleAdminState(env, msg, state) {
     const katS = kategoriS.find(k => String(k.id) === String(state.katId))
     if (!katS) { await tgSendMessage(env, chatId, '⚠️ Kategori tidak ditemukan.'); await deleteKey(env, 'adminState_' + fromId); return }
     const produkS = await readJSON(env, 'Produk', [])
-    const newIdS = produkS.length > 0 ? Math.max(...produkS.map(p => p.id)) + 1 : 1
+    const newIdS = nextId(produkS)
     const descS = text === '-' ? '' : text
     produkS.push({ id: newIdS, nameproduct: katS.produkName, price: state.hargaS, category: katS.produkId, desc: descS, stok: [], single: true })
     await writeJSON(env, 'Produk', produkS)
@@ -1337,7 +1337,7 @@ export async function handleAdminState(env, msg, state) {
       return
     }
     const produk = await readJSON(env, 'Produk', [])
-    const newId = produk.length > 0 ? Math.max(...produk.map(p => p.id)) + 1 : 1
+    const newId = nextId(produk)
     const desc = text === '-' ? '' : text
     produk.push({
       id: newId,
@@ -2058,7 +2058,7 @@ export async function handleAdminState(env, msg, state) {
 // ─── Internal: simpan kategori ke KV ──────────────────────────────────
 async function _saveKategori(env, chatId, fromId, namaKat, desc) {
   const kategori = await readJSON(env, 'Kategori', [])
-  const newId = kategori.length > 0 ? Math.max(...kategori.map(k => k.id)) + 1 : 1
+  const newId = nextId(kategori)
   const produkId = namaKat.toLowerCase().replace(/\s+/g, '_') + '_' + newId
   kategori.push({
     id: newId,
@@ -2168,7 +2168,7 @@ export async function handleAdminCallback(env, cq) {
       return
     }
     const rows = kategori.map(k => {
-      const vs = produk.filter(p => p.category === k.produkId)
+      const vs = varianKat(produk, k)
       const sv = vs.find(v => v.single)
       const lbl = sv ? ('📦 ' + k.produkName + ' · langsung') : ('🗂️ ' + k.produkName + ' (' + vs.length + ' varian)')
       return [{ text: lbl, callback_data: 'adm_addstock_kat_' + k.id }]
@@ -2194,7 +2194,7 @@ export async function handleAdminCallback(env, cq) {
         null, 'Markdown')
       return
     }
-    const variants = produk.filter(p => p.category === kat.produkId)
+    const variants = varianKat(produk, kat)
     const rows = variants.map(v => [{
       text: '📦 [' + v.id + '] ' + v.nameproduct + ' (' + (v.stok ? v.stok.length : 0) + ' stok)',
       callback_data: 'adm_addstock_' + v.id
@@ -2551,7 +2551,7 @@ export async function handleAdminCallback(env, cq) {
     const katS = kategoriS.find(k => String(k.id) === String(state.katId))
     if (!katS) { await tgSendMessage(env, chatId, '⚠️ Kategori tidak ditemukan.'); await deleteKey(env, 'adminState_' + fromId); return }
     const produkS = await readJSON(env, 'Produk', [])
-    const newIdS = produkS.length > 0 ? Math.max(...produkS.map(p => p.id)) + 1 : 1
+    const newIdS = nextId(produkS)
     produkS.push({ id: newIdS, nameproduct: katS.produkName, price: state.hargaS, category: katS.produkId, desc: '', stok: [], single: true })
     await writeJSON(env, 'Produk', produkS)
     await writeJSON(env, 'adminState_' + fromId, { action: 'addstock_data', variantId: newIdS, variantName: katS.produkName })
@@ -2577,7 +2577,7 @@ export async function handleAdminCallback(env, cq) {
       return
     }
     const produk = await readJSON(env, 'Produk', [])
-    const newId = produk.length > 0 ? Math.max(...produk.map(p => p.id)) + 1 : 1
+    const newId = nextId(produk)
     produk.push({
       id: newId,
       nameproduct: state.varianNama,
@@ -2905,7 +2905,7 @@ export async function handleAdminCallback(env, cq) {
     // filter kategori: ada varian eligible (stok > 0, belum FS)
     const rows = []
     for (const k of kategori) {
-      const vs = produk.filter(p => p.category === k.produkId)
+      const vs = varianKat(produk, k)
       const elig = vs.filter(p => (p.stok || []).length > 0 && !fsAll[String(p.id)])
       if (elig.length === 0) continue
       const sv = vs.find(v => v.single)
@@ -2931,7 +2931,7 @@ export async function handleAdminCallback(env, cq) {
     const k = kategori.find(kt => String(kt.id) === String(katId))
     if (!k) return
     const fsAll = await readJSON(env, 'FlashSale', {})
-    const vs = produk.filter(p => p.category === k.produkId)
+    const vs = varianKat(produk, k)
     const sv = vs.find(v => v.single)
     if (sv && (sv.stok || []).length > 0 && !fsAll[String(sv.id)]) {
       // produk langsung — lompat ke STEP 2 tanpa tanya varian

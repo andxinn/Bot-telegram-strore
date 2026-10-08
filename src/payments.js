@@ -1,7 +1,7 @@
 import { InvoiceLogger, SimulatePayment, NamaBot } from './config.js'
 import { readJSON, writeJSON, writeText, deleteKey, existsKey } from './kv.js'
 import { tgSendMessage, tgSendDocument, tgDeleteMessage, tgEditMessageCaption, tgSendSticker } from './telegram.js'
-import { escapeMarkdown, ParseIdr, formatWIB, getDate, getTanggalJam, generateTrxId, parseExpiredWIB, sansBold, escHtml } from './helpers.js'
+import { escapeMarkdown, ParseIdr, formatWIB, getDate, getTanggalJam, generateTrxId, parseExpiredWIB, sansBold, escHtml, stokLayakJual } from './helpers.js'
 import { pakasirDetail } from './pakasir.js'
 import { duitkuStatus } from './duitku.js'
 import { getMainMenuKeyboard } from './keyboard.js'
@@ -182,10 +182,13 @@ async function reserveStock(env, variantId, qty) {
     const produk = await readJSON(env, 'Produk', [])
     const idx = produk.findIndex(pr => String(pr.id) === String(variantId))
     if (idx === -1) return null
-    const list = produk[idx].stok || []
-    if (list.length < qty) return null
-    const taken = list.slice(0, qty)
-    produk[idx].stok = list.slice(qty)
+    // Q2: reserve dari stok layak jual dulu — kadaluarsa tak ikut terjual.
+    const raw = produk[idx].stok || []
+    const layak = stokLayakJual(raw)
+    if (layak.length < qty) return null
+    const taken = layak.slice(0, qty)
+    const takenSet = new Set(taken)
+    produk[idx].stok = raw.filter(s => !takenSet.has(s))
     await writeJSON(env, 'Produk', produk)
     return taken
   } finally {
@@ -347,7 +350,7 @@ async function processPaymentSuccess(env, session, matchData) {
     return
   }
   const produkIdx = produk.findIndex(pr => pr.id === details.id)
-  const stokList = produk[produkIdx].stok || []
+  const stokList = stokLayakJual(produk[produkIdx].stok)
   const jumlahPesanan = details.cart
   if (stokList.length < jumlahPesanan) {
     const { addSaldo } = await import('./user.js')

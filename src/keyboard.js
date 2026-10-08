@@ -31,7 +31,8 @@ function getProductNumberKeyboard(kategori = [], page = 1) {
   const pageItems = kategori.slice(start, start + ITEMS_PER_PAGE)
   const rows = []
   for (let i = 0; i < pageItems.length; i += 3) {
-    rows.push(pageItems.slice(i, i + 3).map(k => ({ text: String(k.id) })))
+    // Q2: nomor urut halaman (1,2,3...) — bukan ID asli (membingungkan bila ID tak berurutan).
+    rows.push(pageItems.slice(i, i + 3).map((k, j) => ({ text: String(start + i + j + 1) })))
   }
   const nav = []
   if (pg > 1) nav.push({ text: '⬅️ Sebelumnya' })

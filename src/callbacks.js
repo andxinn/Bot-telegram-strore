@@ -1,7 +1,7 @@
 import { NamaBot, StoreName, OwnerID, InvoiceLogger, BannerFileId, SimulatePayment, SimulateDelay, orderBotName } from './config.js'
 import { readJSON, writeJSON, deleteKey, readText, writeText, existsKey } from './kv.js'
 import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgEditMessageText, tgEditMessageMedia, tgEditMessageCaption, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendDocumentFile, tgSendSticker, tgCloseForumTopic, tgReopenForumTopic } from './telegram.js'
-import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam, generateTrxId, generateOrderId, generateUniqueOrderId, expiredTime, parseExpiredWIB } from './helpers.js'
+import { escapeMarkdown, mdSafe, ParseIdr, formatWIB, getDate, getTanggalJam, generateTrxId, generateUniqueOrderId, expiredTime, loadingBar, generateTicketId, sansBold, stokLayakJual, varianKat } from './helpers.js'
 import { getUser, addUser, addSaldo, cekSaldo, minSaldo, isOwner, getRole, acquireLock, releaseLock } from './user.js'
 import { getManagePanel, getMainMenuKeyboard } from './keyboard.js'
 import { generateQris } from './qris.js'
@@ -344,7 +344,7 @@ async function handleCallbackQuery(env, cq) {
     if (!kat) { await tgAnswerCallbackQuery(env, cqId, 'Produk tidak ditemukan.', true); return }
     await tgAnswerCallbackQuery(env, cqId, '🛒 Membuka kategori ' + kat.produkName, false)
     const produk = await readJSON(env, 'Produk', [])
-    const variants = produk.filter(pr => pr.category === kat.produkId)
+    const variants = varianKat(produk, kat)
     if (variants.length === 0) { await tgAnswerCallbackQuery(env, cqId, 'Belum ada varian.', true); return }
     const { buildVariantView } = await import('./messages.js')
     const fsAll = await readJSON(env, 'FlashSale', {})
@@ -463,7 +463,7 @@ async function handleCallbackQuery(env, cq) {
     if (!kat) { await tgAnswerCallbackQuery(env, cqId, 'Produk tidak ditemukan.', true); return }
     await tgAnswerCallbackQuery(env, cqId, '🔄 Detail diperbarui', false)
     const produk = await readJSON(env, 'Produk', [])
-    const variants = produk.filter(p => p.category === kat.produkId)
+    const variants = varianKat(produk, kat)
     const fsAll = await readJSON(env, 'FlashSale', {})
     const nowFs = Date.now()
     const fsMap = {}
@@ -485,8 +485,8 @@ async function handleCallbackQuery(env, cq) {
     const p = produk.find(pr => String(pr.id) === String(variantId))
     if (!p) { await tgAnswerCallbackQuery(env, cqId, 'Varian tidak ditemukan.', true); return }
     const kategori = await readJSON(env, 'Kategori', [])
-    const kat = kategori.find(k => k.produkId === p.category)
-    const stockCount = p.stok ? p.stok.length : 0
+    const kat = kategori.find(k => String(k.produkId) === String(p.category) || String(p.category) === 'c' + String(k.id) || String(p.category) === String(k.id))
+    const stockCount = stokLayakJual(p.stok).length
     if (stockCount === 0) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Stok produk "' + p.nameproduct + '" sedang KOSONG.\nSilakan pilih varian lain.', true); return }
     // v9update18: effective price (Flash Sale aware) — locks the price at order time
     const { getEffectivePrice } = await import('./user.js')
@@ -508,7 +508,7 @@ async function handleCallbackQuery(env, cq) {
     if (orderState) kat = kategori.find(k => k.id === (orderState.kategoriId || 0)) || kategori.find(k => k.produkId === orderState.produkId)
     if (!kat) { await tgAnswerCallbackQuery(env, cqId, 'Sesi habis, silakan mulai ulang.', true); return }
     const produk = await readJSON(env, 'Produk', [])
-    const variants = produk.filter(pr => pr.category === kat.produkId)
+    const variants = varianKat(produk, kat)
     const { buildVariantView } = await import('./messages.js')
     const fsAll = await readJSON(env, 'FlashSale', {})
     const nowFs = Date.now()
@@ -535,7 +535,7 @@ async function handleCallbackQuery(env, cq) {
     const produk = await readJSON(env, 'Produk', [])
     const p = produk.find(pr => String(pr.id) === String(productId))
     if (!p) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Produk tidak ditemukan.', true); return }
-    const stockCount = p.stok ? p.stok.length : 0
+    const stockCount = stokLayakJual(p.stok).length
     if (stockCount === 0) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Stok produk ini sedang KOSONG.', true); return }
     // Cap 50: confirm_ menolak qty > 50, jadi increase_ tidak boleh lewat 50
     const maxQty = Math.min(50, Math.max(1, stockCount))
@@ -575,7 +575,7 @@ async function handleCallbackQuery(env, cq) {
     const produk = await readJSON(env, 'Produk', [])
     const p = produk.find(pr => String(pr.id) === String(productId))
     if (!p) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Produk tidak ditemukan.', true); return }
-    const stockCount = p.stok ? p.stok.length : 0
+    const stockCount = stokLayakJual(p.stok).length
     if (stockCount === 0) { await tgAnswerCallbackQuery(env, cqId, '⚠️ Stok produk "' + p.nameproduct + '" sedang KOSONG.\nSilakan pilih varian lain.', true); return }
     if (orderState.jumlahPesanan > stockCount) orderState.jumlahPesanan = stockCount
     orderState.stock_count = stockCount
@@ -614,7 +614,7 @@ async function handleCallbackQuery(env, cq) {
       const produk = await readJSON(env, 'Produk', [])
       const p = produk.find(pr => String(pr.id) === String(productId))
       if (!p) { await releaseLock(env, lockKey); await tgSendMessage(env, chatId, '❌ Produk tidak ditemukan.'); return }
-      const stockCount = p.stok ? p.stok.length : 0
+      const stockCount = stokLayakJual(p.stok).length
       if (stockCount < jumlahPesanan) {
         await releaseLock(env, lockKey)
         await tgSendMessage(env, chatId, '❌ Stok tidak mencukupi. Tersedia: ' + stockCount)

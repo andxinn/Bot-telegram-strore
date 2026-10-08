@@ -2,7 +2,7 @@ import { showAdminPanel, recordStokBaru } from './admin.js'
 import { NamaBot, StoreName, OwnerID, OwnerUsername, ChannelLog, InvoiceLogger, ChannelStore, CS, Mode, SimulatePayment, SimulateDelay, ButtonMenu, BannerFileId, bannerStartB64, initConfig } from './config.js'
 import { readJSON, writeJSON, readText, writeText, deleteKey, existsKey } from './kv.js'
 import { tgSendMessage, tgSendPhoto, tgSendPhotoFile, tgSendPhotoUrl, tgSendPhotoBase64, tgEditMessageText, tgDeleteMessage, tgAnswerCallbackQuery, tgSendDocument, tgSendChatAction, tgSetMyCommands } from './telegram.js'
-import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam, chunkArray, sleep, generateTrxId, boxFormat } from './helpers.js'
+import { escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam, chunkArray, sleep, generateTrxId, boxFormat, nextId } from './helpers.js'
 import { getUserList, getUser, addUser, addSaldo, minSaldo, cekSaldo, isOwner, isRegistered, getRole, addRole, demoteRole, isBanned, addBan, delBan } from './user.js'
 import { getReplyKeyboard, getManagePanel } from './keyboard.js'
 import { ITEMS_PER_PAGE } from './constants.js'
@@ -253,7 +253,7 @@ async function handleCommand(env, msg) {
     }
     const [name, desc] = input.split('|').map(s => s.trim())
     const kategori = await readJSON(env, 'Kategori', [])
-    const newId = kategori.length > 0 ? Math.max(...kategori.map(k => k.id)) + 1 : 1
+    const newId = nextId(kategori)
     const produkId = name.toLowerCase().replace(/\s+/g, '_') + '_' + newId
     kategori.push({ id: newId, produkName: name, produkId, produkXuid: 'X' + String(newId).padStart(3, '0') })
     await writeJSON(env, 'Kategori', kategori)

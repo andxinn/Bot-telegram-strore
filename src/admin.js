@@ -1031,7 +1031,7 @@ export async function handleAdminState(env, msg, state) {
       )
     } else {
       await tgSendMessage(env, chatId,
-        '✅ Banner Update Harga disimpan (' + b64.length + ' chars). Preview akan muncul di BC Harga berikutnya.',
+        saved === 'photo' ? '✅ Banner Update Harga disimpan (foto). Preview akan muncul di BC Harga berikutnya.' : '✅ Banner Update Harga disimpan (base64). Preview akan muncul di BC Harga berikutnya.',
         { inline_keyboard: [[{ text: '🔙 Settings', callback_data: 'adm_setfolder_media' }]] }, 'Markdown'
       )
     }
@@ -3293,7 +3293,7 @@ export async function handleAdminCallback(env, cq) {
     let cap = '*🔥 Banner Flash Sale*\n\n'
     cap += 'Status: ' + (has ? '✅ sudah diset' : '❌ belum diset') + '\n\n'
     cap += 'Kirim *foto* langsung, atau file *.txt* berisi *base64* gambar banner Flash Sale.\n'
-    cap += '_(Recommended: 1200x600 landscape, tema merah/oranye, format PNG/JPG di-encode base64)_\n\n'
+    cap += '_(Recommended: 1200x600 landscape, tema merah/oranye)_\n\n'
     cap += 'Banner ini akan dipakai sebagai header broadcast Flash Sale.'
     const kb = has
       ? { inline_keyboard: [[{ text: '🗑 Hapus Banner', callback_data: 'adm_del_fs_banner' }], [{ text: '🔙 Batal', callback_data: 'adm_settings' }]] }
@@ -3322,7 +3322,7 @@ export async function handleAdminCallback(env, cq) {
     let cap = '*💰 Banner Update Harga*\n\n'
     cap += 'Status: ' + (has ? '✅ sudah diset' : '❌ belum diset') + '\n\n'
     cap += 'Kirim *foto* langsung, atau file *.txt* berisi *base64* gambar banner Update Harga.\n'
-    cap += '_(Recommended: 1200x600 landscape, tema hijau/biru, format PNG/JPG di-encode base64)_\n\n'
+    cap += '_(Recommended: 1200x600 landscape, tema hijau/biru)_\n\n'
     cap += 'Banner ini akan dipakai sebagai header broadcast "BC Harga Baru".'
     const kb = has
       ? { inline_keyboard: [[{ text: '🗑 Hapus Banner', callback_data: 'adm_del_price_banner' }], [{ text: '🔙 Batal', callback_data: 'adm_settings' }]] }
@@ -3861,10 +3861,10 @@ export async function handleAdminCallback(env, cq) {
       '*🖼️ MEDIA & BANNER*\nPengaturan gambar banner dan stiker bot:',
       {
         inline_keyboard: [
-          [{ text: '🖼️ Banner Start (Base64)', callback_data: 'adm_set_banner_start' }],
-          [{ text: '🖼️ Banner List Produk (Base64)', callback_data: 'adm_set_banner_list' }],
-          [{ text: '🔥 Banner Flash Sale (Base64)', callback_data: 'adm_set_fs_banner' }],
-          [{ text: '💰 Banner Update Harga (Base64)', callback_data: 'adm_set_price_banner' }],
+          [{ text: '🖼️ Banner Start', callback_data: 'adm_set_banner_start' }],
+          [{ text: '🖼️ Banner List Produk', callback_data: 'adm_set_banner_list' }],
+          [{ text: '🔥 Banner Flash Sale', callback_data: 'adm_set_fs_banner' }],
+          [{ text: '💰 Banner Update Harga', callback_data: 'adm_set_price_banner' }],
           [{ text: '🖼️ Gambar Broadcast Stok', callback_data: 'adm_set_bcstok_img' }],
           [{ text: '🎯 Sticker Sukses' + stStatus, callback_data: 'adm_set_success_sticker' }],
           [{ text: '🔙 Kembali ke Settings', callback_data: 'adm_settings' }]

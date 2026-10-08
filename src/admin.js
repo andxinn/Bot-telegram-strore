@@ -201,35 +201,126 @@ function fsBuildBcPriceCaption(variantName, kategoriName, oldPrice, newPrice) {
   return cap
 }
 
-// Broadcast helper: kirim ke semua user dengan optional banner base64.
-// Chunked: max 30/dtk Telegram → jeda tiap 20 user + hormati 429.
-// caption: { text, parseMode } (format baru) atau string Markdown (legacy).
-async function fsBroadcastToAllUsers(env, bannerB64, caption, buyBtn) {
-  const users = await readJSON(env, 'UserList', [])
-  let sent = 0, failed = 0
-  const kb = buyBtn ? { inline_keyboard: [[buyBtn]] } : undefined
-  const { tgSendPhotoBase64: sendPhoto, tgSendMessage: sendMsg } = await import('./telegram.js')
-  const capText = (caption && typeof caption === 'object') ? caption.text : caption
-  const capMode = (caption && typeof caption === 'object') ? (caption.parseMode || 'HTML') : 'Markdown'
-  for (let i = 0; i < users.length; i++) {
-    const uid = users[i].chatId
-    try {
-      const r = bannerB64
-        ? await sendPhoto(env, uid, bannerB64, capText, kb, capMode)
-        : await sendMsg(env, uid, capText, kb, capMode)
-      // Hormati rate-limit 429: mundur sesuai retry_after lalu lanjut sekali
-      if (r && r.error_code === 429 && r.parameters && r.parameters.retry_after) {
-        await new Promise(res => setTimeout(res, (Number(r.parameters.retry_after) + 1) * 1000))
-        const r2 = bannerB64
-          ? await sendPhoto(env, uid, bannerB64, capText, kb, capMode)
-          : await sendMsg(env, uid, capText, kb, capMode)
-        if (r2 && r2.ok) sent++; else failed++
-      } else if (r && r.ok) sent++
-      else failed++
-    } catch (e) { failed++ }
-    if ((i + 1) % 20 === 0) await new Promise(r => setTimeout(r, 800))
+// ─── Q1: BC generik resumable anti-banned (port STB broadcast.js, alih-call KV).
+// State 'BcState_<tag>': { targets, idx, sent, fail, payload, retry429[] }.
+// payload: { text, mode, banner:{id,b64}|null, button|undefined }.
+// Tutup-tengah-jalan → cron lanjutkan; tolak dobel bila sudah jalan.
+const BC_CHUNK = 500
+function bcTag(tag) { return String(tag == null ? '' : tag).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 60) }
+async function bcStateKeys(env) {
+  try { const { readJSON: rq } = await import('./kv.js'); const ix = await rq(env, 'BcStateIndex', []); return Array.isArray(ix) ? ix : [] }
+  catch { return [] }
+}
+async function bcIndexAdd(env, key) {
+  try {
+    const { readJSON: rq, writeJSON: wq } = await import('./kv.js')
+    const ix = await bcStateKeys(env)
+    if (!ix.includes(key)) { ix.push(key); await wq(env, 'BcStateIndex', ix) }
+  } catch {}
+}
+async function bcIndexDel(env, key) {
+  try {
+    const { readJSON: rq, writeJSON: wq } = await import('./kv.js')
+    const ix = await bcStateKeys(env)
+    if (ix.includes(key)) await wq(env, 'BcStateIndex', ix.filter(k => k !== key))
+  } catch {}
+}
+async function bcSourceAlive(env, stateKey) {
+  try {
+    const { readJSON: rq } = await import('./kv.js')
+    if (stateKey.startsWith('BcState_fs_')) {
+      const { flashSaleGetActive } = await import('./user.js')
+      return !!(await flashSaleGetActive(env, stateKey.replace('BcState_fs_', '')))
+    }
+    if (stateKey.startsWith('BcState_harga_')) {
+      return (await rq(env, 'PriceChangeLog_' + stateKey.replace('BcState_harga_', ''), null)) !== null
+    }
+    if (stateKey.startsWith('BcState_vou_')) {
+      const b = await rq(env, 'VoucherBatch', null)
+      return !!(b && b[stateKey.replace('BcState_vou_', '')])
+    }
+  } catch {}
+  return true
+}
+async function bcFinish(env, stateKey, st) {
+  try {
+    const { readJSON: rq, writeJSON: wq, deleteKey: dq } = await import('./kv.js')
+    if (stateKey.startsWith('BcState_fs_')) {
+      const { flashSaleGetActive, flashSaleSetActive } = await import('./user.js')
+      const fs = await flashSaleGetActive(env, stateKey.replace('BcState_fs_', ''))
+      if (fs) { fs.broadcasted = true; fs.broadcastAt = Date.now(); fs.broadcastSent = st.sent; await flashSaleSetActive(env, stateKey.replace('BcState_fs_', ''), fs) }
+    } else if (stateKey.startsWith('BcState_harga_')) {
+      await dq(env, 'PriceChangeLog_' + stateKey.replace('BcState_harga_', ''))
+    } else if (stateKey.startsWith('BcState_vou_')) {
+      const bid = stateKey.replace('BcState_vou_', '')
+      const batches = await rq(env, 'VoucherBatch', null)
+      if (batches && batches[bid]) { batches[bid].broadcasted = true; batches[bid].broadcastAt = Date.now(); batches[bid].broadcastSent = st.sent; await wq(env, 'VoucherBatch', batches) }
+    }
+  } catch {}
+  try { const { deleteKey: dq2 } = await import('./kv.js'); await dq2(env, stateKey) } catch {}
+  await bcIndexDel(env, stateKey)
+  console.log('[cron] BC ' + stateKey + ' SELESAI: ' + st.sent + '/' + st.targets.length + (st.fail ? ' (' + st.fail + ' gagal)' : ''))
+}
+export async function bcFlush(env, stateKey) {
+  const { acquireLock, releaseLock } = await import('./user.js')
+  const gotLock = await acquireLock(env, 'bc_' + stateKey, 300)
+  if (!gotLock) return { ok: false, reason: 'locked' }
+  try {
+    const { readJSON: rq, writeJSON: wq } = await import('./kv.js')
+    const { safeBatchSend: sbs } = await import('./helpers.js')
+    const st = await rq(env, stateKey, null)
+    if (!st || !Array.isArray(st.targets)) { await bcIndexDel(env, stateKey); return { ok: true, done: true, sent: 0, total: 0 } }
+    if (!(await bcSourceAlive(env, stateKey))) {
+      try { const { deleteKey: dq } = await import('./kv.js'); await dq(env, stateKey) } catch {}
+      await bcIndexDel(env, stateKey)
+      console.log('[cron] BC ' + stateKey + ' dibuang: sumber hilang')
+      return { ok: true, done: true, skipped: true, sent: st.sent || 0, total: st.targets.length }
+    }
+    const { tgSendMessage: sendMsg, tgSendPhotoBase64: sendPhotoB64, tgSendPhoto: sendPhotoId } = await import('./telegram.js')
+    const p = st.payload || {}
+    const kb = p.button ? { inline_keyboard: [[p.button]] } : undefined
+    const sendOne = (uid) => {
+      if (p.banner && p.banner.id) return sendPhotoId(env, uid, p.banner.id, p.text, kb, p.mode || 'Markdown')
+      if (p.banner && p.banner.b64) return sendPhotoB64(env, uid, p.banner.b64, p.text, kb, p.mode || 'Markdown')
+      return sendMsg(env, uid, p.text, kb, p.mode || 'Markdown')
+    }
+    const freshEnd = Math.min((st.idx || 0) + BC_CHUNK, st.targets.length)
+    const todo = (st.retry429 || []).concat(st.targets.slice(st.idx || 0, freshEnd))
+    const r = await sbs(todo, sendOne)
+    st.idx = freshEnd
+    st.sent = (st.sent || 0) + r.sent
+    st.fail = (st.fail || 0) + r.failed
+    st.retry429 = r.rest
+    if (st.idx >= st.targets.length && st.retry429.length === 0) {
+      await bcFinish(env, stateKey, st)
+      return { ok: true, done: true, sent: st.sent, total: st.targets.length, fail: st.fail }
+    }
+    await wq(env, stateKey, st)
+    console.log('[cron] BC ' + stateKey + ' chunk: ' + st.sent + '/' + st.targets.length)
+    return { ok: true, done: false, sent: st.sent, total: st.targets.length }
+  } finally {
+    try { const { releaseLock: rl } = await import('./user.js'); await rl(env, 'bc_' + stateKey) } catch {}
   }
-  return { sent, failed, total: users.length }
+}
+export async function flushBcStates(env) {
+  const keys = await bcStateKeys(env)
+  let n = 0
+  for (const k of keys) {
+    try { const r = await bcFlush(env, k); if (r && r.ok) n++ } catch (e) { console.error('[cron bc] ' + k + ': ' + e.message) }
+  }
+  return { ok: true, flushed: n }
+}
+export async function bcStart(env, tag, targets, payload) {
+  const stateKey = 'BcState_' + bcTag(tag)
+  const { readJSON: rq, writeJSON: wq } = await import('./kv.js')
+  const cur = await rq(env, stateKey, null)
+  if (cur && Array.isArray(cur.targets) && ((cur.idx || 0) < cur.targets.length || (cur.retry429 || []).length > 0)) {
+    return { ok: false, reason: 'running', sent: cur.sent || 0, total: cur.targets.length }
+  }
+  if (!targets || targets.length === 0) return { ok: false, reason: 'empty' }
+  await wq(env, stateKey, { targets, idx: 0, sent: 0, fail: 0, payload, retry429: [] })
+  await bcIndexAdd(env, stateKey)
+  return await bcFlush(env, stateKey)
 }
 
 // Ambil banner Flash Sale dari BotConfig
@@ -648,39 +739,17 @@ export async function flushStokBaruNotif(env) {
     }
 
     const { tgSendMessage: sendMsg, tgSendPhotoBase64: sendPhoto } = await import('./telegram.js')
+    const { safeBatchSend: sbs } = await import('./helpers.js')
     const bcImg = cfg.stokBcImg || null
-    // Tick ini: kirim chunk dari idx, ditambah retry user 429 dari tick sebelumnya
+    // Tick ini: kirim chunk dari idx, ditambah retry user 429 dari tick sebelumnya.
+    // Q1: via safeBatchSend (±15/dtk, 429 tunggu penuh, stop 5x beruntun).
     const freshStart = st.idx
     const freshEnd = Math.min(st.idx + STOK_NOTIF_CHUNK, st.targets.length)
     const todo = st.retry429.concat(st.targets.slice(freshStart, freshEnd))
-    let chunkOk = 0, chunkFail = [], cooldown = 0
-
-    for (let i = 0; i < todo.length; i += 25) {
-      const batch = todo.slice(i, Math.min(i + 25, todo.length))
-      const results = await Promise.allSettled(batch.map(async (uid) => {
-        try {
-          const r = await stokSendOne(env, sendMsg, sendPhoto, bcImg, uid, st.msg)
-          if (r && r.ok === false) {
-            if (r.error_code === 429 && r.parameters && r.parameters.retry_after) {
-              cooldown = Math.max(cooldown, Number(r.parameters.retry_after) || 1)
-            }
-            throw new Error(r.description || ('tg ' + r.error_code))
-          }
-          return true
-        } catch (e) { throw e }
-      }))
-      for (let j = 0; j < results.length; j++) {
-        if (results[j].status === 'fulfilled') chunkOk++
-        else chunkFail.push({ uid: batch[j], reason: String(results[j].reason && results[j].reason.message || 'err') })
-      }
-      if (cooldown > 0) {
-        await new Promise(r => setTimeout(r, Math.min(cooldown, 30) * 1000))
-        cooldown = 0
-      }
-    }
-
-    const failed429 = chunkFail.filter(f => /^429/.test(f.reason)).map(f => f.uid)
-    const hardFail = chunkFail.filter(f => !/^429/.test(f.reason)).length
+    const r = await sbs(todo, (uid) => stokSendOne(env, sendMsg, sendPhoto, bcImg, uid, st.msg))
+    const chunkOk = r.sent
+    const hardFail = r.failed
+    const failed429 = r.rest
     st.idx = freshEnd
     st.sent += chunkOk
     st.retry429 = failed429
@@ -3115,14 +3184,24 @@ export async function handleAdminCallback(env, cq) {
     const banner = await fsGetBanner(env, 'bannerFsB64')
     const cap = await fsBuildBcCaption(env, fs, p ? p.nameproduct : fs.variantName, kat ? kat.produkName : null)
     const buyBtn = { text: '🛒 BELI SEKARANG (SALE)', callback_data: 'dpi_' + vid }
-    const res = await fsBroadcastToAllUsers(env, banner, cap, buyBtn)
-    // update FS metadata
-    fs.broadcasted = true
-    fs.broadcastAt = Date.now()
-    fs.broadcastSent = res.sent
-    await flashSaleSetActive(env, vid, fs)
+    // Q1: via bcStart resumable anti-banned (cron lanjutkan sisa).
+    const targets = (await readJSON(env, 'UserList', [])).map(u => u.chatId).filter(id => Number(id) > 0)
+    const capObj = cap
+    const res = await bcStart(env, 'fs_' + vid, targets, {
+      text: (capObj && capObj.text) || capObj, mode: (capObj && capObj.parseMode) || 'HTML',
+      banner: banner ? { id: null, b64: banner } : null,
+      button: buyBtn,
+    })
+    if (res.reason === 'running') {
+      await tgSendMessage(env, chatId,
+        '⏳ *Broadcast FS ini sedang jalan* (' + res.sent + '/' + res.total + '). Tunggu selesai — cron otomatis melanjutkan.',
+        { inline_keyboard: [[{ text: '📋 Daftar Aktif', callback_data: 'adm_fs_list' }, { text: '🏠 Menu', callback_data: 'adm_flashsale' }]] },
+        'Markdown'
+      )
+      return
+    }
     await tgSendMessage(env, chatId,
-      '✅ *Broadcast Flash Sale selesai*\n\nTerkirim: *' + res.sent + '/' + res.total + '*\nGagal: ' + res.failed + (banner ? '' : '\n\n_(tanpa banner — belum diset)_'),
+      (res.done ? '✅ *Broadcast Flash Sale selesai*' : '⏳ *Broadcast FS dimulai*') + '\n\nTerkirim: *' + res.sent + '/' + res.total + '*\nGagal: ' + (res.fail || 0) + (res.done ? '' : '\nSisa otomatis dilanjutkan cron tiap menit.') + (banner ? '' : '\n\n_(tanpa banner — belum diset)_'),
       { inline_keyboard: [[{ text: '📋 Daftar Aktif', callback_data: 'adm_fs_list' }, { text: '🏠 Menu', callback_data: 'adm_flashsale' }]] },
       'Markdown'
     )
@@ -3163,10 +3242,22 @@ export async function handleAdminCallback(env, cq) {
     const banner = await fsGetBanner(env, 'bannerPriceB64')
     const cap = fsBuildBcPriceCaption(p.nameproduct, kat ? kat.produkName : null, chg.oldPrice, chg.newPrice)
     const buyBtn = { text: '🛒 Lihat Produk', callback_data: 'dpi_' + vid }
-    const res = await fsBroadcastToAllUsers(env, banner, cap, buyBtn)
-    await deleteKey(env, 'PriceChangeLog_' + vid)
+    // Q1: via bcStart (tuntas → bcFinish hapus PriceChangeLog + tandai).
+    const targets = (await readJSON(env, 'UserList', [])).map(u => u.chatId).filter(id => Number(id) > 0)
+    const res = await bcStart(env, 'harga_' + vid, targets, {
+      text: cap, mode: 'Markdown',
+      banner: banner ? { id: null, b64: banner } : null,
+      button: buyBtn,
+    })
+    if (res.reason === 'running') {
+      await tgSendMessage(env, chatId,
+        '⏳ *BC harga ini sedang jalan* (' + res.sent + '/' + res.total + '). Tunggu selesai — cron otomatis melanjutkan.',
+        adminMainPanel(), 'Markdown'
+      )
+      return
+    }
     await tgSendMessage(env, chatId,
-      '✅ *BC Harga Baru selesai*\n\nTerkirim: *' + res.sent + '/' + res.total + '*\nGagal: ' + res.failed + (banner ? '' : '\n\n_(tanpa banner — belum diset)_'),
+      (res.done ? '✅ *BC Harga Baru selesai*' : '⏳ *BC Harga dimulai*') + '\n\nTerkirim: *' + res.sent + '/' + res.total + '*\nGagal: ' + (res.fail || 0) + (res.done ? '' : '\nSisa otomatis dilanjutkan cron tiap menit.') + (banner ? '' : '\n\n_(tanpa banner — belum diset)_'),
       adminMainPanel(), 'Markdown'
     )
     return
@@ -4722,31 +4813,22 @@ export async function handleAdminCallback(env, cq) {
     bcText += codesList
     bcText += '\nCara tukar:\n`/redeem <KODE>`'
 
-    let sent = 0, failed = 0
-    for (const u of users) {
-      if (!u.chatId) continue
-      try {
-        const res = await tgSendMessage(env, u.chatId, bcText, null, 'Markdown')
-        if (res && res.ok) {
-          sent++
-        } else {
-          failed++
-        }
-      } catch (e) {
-        failed++
-      }
-      if ((sent + failed) % 20 === 0) await sleep(500)
+    // Q1: BC resumable — state BcState_vou_<bid>, cron lanjutkan bila terpotong.
+    const uids = users.map(u => u.chatId).filter(id => Number(id) > 0)
+    const bcRes = await bcStart(env, 'vou_' + bid, uids, { text: bcText, mode: 'Markdown', banner: null })
+    if (bcRes.reason === 'running') {
+      await tgSendMessage(env, chatId, '⏳ *Broadcast batch ini sedang jalan* (' + bcRes.sent + '/' + bcRes.total + '). Tunggu selesai — cron otomatis melanjutkan.', {
+        inline_keyboard: [
+          [{ text: '📄 Detail Batch', callback_data: 'adm_voucher_batch_' + bid }],
+          [{ text: '🎫 Menu Voucher', callback_data: 'adm_voucher' }]
+        ]
+      }, 'Markdown')
+      return
     }
-
-    b.broadcasted = true
-    b.broadcastAt = Date.now()
-    b.broadcastSent = sent
-    batches[bid] = b
-    await writeJSON(env, 'VoucherBatch', batches)
-
-    let resCap = '*✅ BROADCAST SELESAI*\n\n'
-    resCap += 'Terkirim : *' + sent + '* user\n'
-    resCap += 'Gagal    : ' + failed + ' user\n'
+    let resCap = (bcRes.done ? '*✅ BROADCAST SELESAI*' : '*⏳ BROADCAST DIMULAI*') + '\n\n'
+    resCap += 'Terkirim : *' + bcRes.sent + '* user\n'
+    resCap += 'Gagal    : ' + (bcRes.fail || 0) + ' user\n'
+    if (!bcRes.done) resCap += '\nSisa otomatis dilanjutkan cron tiap menit.'
     await tgSendMessage(env, chatId, resCap, {
       inline_keyboard: [
         [{ text: '📄 Detail Batch', callback_data: 'adm_voucher_batch_' + bid }],

@@ -206,9 +206,47 @@ async function generateUniqueOrderId(env, namaBot, tries = 5) {
 }
 
 
+// Anti-banned batch send: 15/dtk, 429 tunggu retry_after PENUH, 5x beruntun stop.
+// Sisa kembali ke pemanggil (rest[]) — lanjut tick berikutnya, bukan spam retry.
+async function safeBatchSend(list, sendOne) {
+  let sent = 0, failed = 0, streak429 = 0, stopped429 = false
+  const done = new Set()
+  for (let i = 0; i < list.length; i += 15) {
+    const batch = list.slice(i, i + 15)
+    const results = await Promise.allSettled(batch.map(async (uid) => {
+      try {
+        const r = await sendOne(uid)
+        if (r && r.ok === false && r.error_code === 429) {
+          const wait = Math.max(Number((r.parameters && r.parameters.retry_after) || 1), 1)
+          await sleep(wait * 1000)
+          const r2 = await sendOne(uid)
+          if (r2 && r2.ok === false && r2.error_code === 429) throw new Error('429')
+          if (r2 && !r2.ok) throw new Error('tg ' + r2.error_code)
+          return true
+        }
+        if (r && r.ok === false) throw new Error('tg ' + r.error_code)
+        return true
+      } catch (e) { throw e }
+    }))
+    for (let j = 0; j < results.length; j++) {
+      if (results[j].status === 'fulfilled') { sent++; streak429 = 0; done.add(batch[j]) }
+      else {
+        done.add(batch[j])
+        if (/^429/.test(String(results[j].reason && results[j].reason.message || ''))) {
+          streak429++
+          if (streak429 >= 5) { stopped429 = true; break }
+        } else { failed++; streak429 = 0 }
+      }
+    }
+    if (stopped429) break
+    if (i + 15 < list.length) await sleep(1000)
+  }
+  return { sent, failed, stopped429, rest: list.filter(u => !done.has(u)) }
+}
+
 export {
   escapeMarkdown, mdSafe, ParseIdr, formatrupiah, formatWIB, getDate, getTanggalJam,
   chunkArray, sleep, toCRC16, generateTrxId, generateOrderId, generateKodeUnik, expiredTime, parseExpiredWIB,
   generateRandomPhone, generateRandomEmail, generateRandomDonationMessage, boxFormat, loadingBar, sansBold, escHtml,
-  generateTicketId, orderIdUnique, generateUniqueOrderId
+  generateTicketId, orderIdUnique, generateUniqueOrderId, safeBatchSend
 }

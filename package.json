@@ -1,6 +1,6 @@
 {
   "name": "telegram-store-bot",
-  "version": "9.19.0",
+  "version": "9.20.0",
   "description": "Telegram Store Bot for Cloudflare Workers",
   "type": "module",
   "scripts": {

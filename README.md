@@ -77,6 +77,10 @@ curl https://your-worker.workers.dev/setup
 - SnK (Syarat & Ketentuan) per produk
 - Invoice ke channel log
 - PM system (user ↔ admin)
+- Parity non-tiket v9.20 (Q1-Q5, lihat CHANGELOG_v9update20.md): broadcast anti-banned
+  (`safeBatchSend` + `bcStart` resumable), stok kadaluarsa tak terjual, varian 3-format,
+  `nextId` anti-NaN, keyboard nomor urut, banner foto file_id semua slot,
+  jadwal backup Harian/30mnt, `tk_list` via renderer tunggal.
 - Tiket bantuan forum-topik v9.19 (P1-P10, lihat PRD-TIKET.md):
   renderer tunggal, auto-route ketik langsung, inbox dot+count,
   Undo tutup 5 dtk, kategori 4 + klaim, SLA 30mnt, channelTicket
@@ -86,5 +90,5 @@ curl https://your-worker.workers.dev/setup
 - Ban/unban user
 - Auto backup setiap jam
 - /manager panel interaktif
-Versi: **9.19.0** (tiket P1-P10) — lihat `PRD-TIKET.md` + `CHANGELOG_v9update19.md`.
+Versi: **9.20.0** (tiket P1-P10 + parity Q1-Q5) — lihat `PRD-TIKET.md` + `CHANGELOG_v9update19.md` + `CHANGELOG_v9update20.md`.
 # Bot-telegram-strore

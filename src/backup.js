@@ -6,8 +6,12 @@ import { getDate } from './helpers.js'
 async function autoBackup(env) {
   try {
     const cfg = await readJSON(env, 'BotConfig', {}).catch(() => ({}))
-    const want = Number((cfg && cfg.JamBackup) ?? env.JAM_BACKUP ?? 6)
-    if (Number.isFinite(want) && (new Date().getUTCHours() + 7) % 24 !== want) return
+    // Jadwal: backupMode 'daily' (default, jam JamBackup) atau '30m' (tiap 30 menit).
+    const mode = (cfg && cfg.backupMode) || 'daily'
+    if (mode !== '30m') {
+      const want = Number((cfg && cfg.JamBackup) ?? env.JAM_BACKUP ?? 6)
+      if (Number.isFinite(want) && (new Date().getUTCHours() + 7) % 24 !== want) return
+    }
     const keys = [
       'Kategori', 'Produk', 'SnK', 'Trx', 'UserList', 'Role', 
       'BannedUser', 'Voucher', 'VoucherBatch', 'VoucherAudit', 
@@ -17,6 +21,16 @@ async function autoBackup(env) {
     const backup = {}
     for (const key of keys) {
       backup[key] = await readJSON(env, key, null)
+    }
+    // Jangan bocorkan secret: token Turso & apiKey gateway tidak ikut backup
+    if (backup.BotConfig && typeof backup.BotConfig === 'object') {
+      if (backup.BotConfig.db) backup.BotConfig = { ...backup.BotConfig, db: { ...backup.BotConfig.db, token: undefined } }
+      if (backup.BotConfig.payment && typeof backup.BotConfig.payment === 'object') {
+        const gw = backup.BotConfig.payment.gateways || {}
+        const scrub = {}
+        for (const [k, v] of Object.entries(gw)) scrub[k] = { ...v, apiKey: undefined }
+        backup.BotConfig = { ...backup.BotConfig, payment: { ...backup.BotConfig.payment, gateways: scrub } }
+      }
     }
     const dateStr = getDate('Asia/Jakarta').replace(/[^0-9]/g, '_')
     const content = JSON.stringify(backup, null, 2)

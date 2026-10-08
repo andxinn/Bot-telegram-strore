@@ -418,12 +418,23 @@ let backupInterval = setInterval(async () => {
   }
 }, 3600000)
 
+// Tick 30 mnt: index yang putuskan jalan/tidak via backupMode (pola STB stb-server.mjs).
+let backup30mInterval = setInterval(async () => {
+  const ctx = { waitUntil: (p) => p.catch(e => console.error('Backup30m error:', e.message)) }
+  try {
+    await worker.default.scheduled({ cron: 'backup30m' }, env, ctx)
+  } catch (err) {
+    console.error('Backup30m error:', err.message)
+  }
+}, 1800000)
+
 // ─── Graceful shutdown ──────────────────────────────────────────────────
 function shutdown() {
   console.log('\n👋 Shutting down...')
   polling = false
   clearInterval(cronInterval)
   clearInterval(backupInterval)
+  try { clearInterval(backup30mInterval) } catch {}
   server.close(() => {
     env.DB.save()
     console.log('   KV disimpan ke dev-db.json')

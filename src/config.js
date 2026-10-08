@@ -39,6 +39,7 @@ let ButtonMenu = {
 }
 
 let channelBackup = ''
+let backupMode = 'daily'
 
 async function initConfig(env) {
   NamaBot = env.NAMA_BOT || 'Tehtarik Store'
@@ -66,6 +67,7 @@ async function initConfig(env) {
       if (kvConfig.OwnerID) OwnerID = kvConfig.OwnerID
       if (kvConfig.InvoiceLogger !== undefined) InvoiceLogger = kvConfig.InvoiceLogger
       if (kvConfig.channelBackup !== undefined) channelBackup = kvConfig.channelBackup
+      if (kvConfig.backupMode === '30m' || kvConfig.backupMode === 'daily') backupMode = kvConfig.backupMode
       if (kvConfig.ChannelStore) ChannelStore = kvConfig.ChannelStore
       if (kvConfig.CS) CS = kvConfig.CS
       if (kvConfig.DataQris) DataQris = kvConfig.DataQris
@@ -97,7 +99,7 @@ async function initConfig(env) {
 }
 
 export {
-  NamaBot, StoreName, OwnerID, OwnerUsername, ChannelLog, InvoiceLogger, channelBackup,
+  NamaBot, StoreName, OwnerID, OwnerUsername, ChannelLog, InvoiceLogger, channelBackup, backupMode,
   ChannelStore, CS, JamBackup, Mode, SimulatePayment, SimulateDelay,
   WebhookSecret, DevToken, BannerFileId, DataQris,
   bannerStartB64, bannerStartId, bannerListB64, bannerListId, bannerFsId, bannerPriceId, leaderboardId, stokBcId, orderBotName, caraOrderText,

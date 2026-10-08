@@ -4061,6 +4061,40 @@ export async function handleAdminCallback(env, cq) {
     return
   }
 
+  if (data === 'adm_backup_sched') {
+    const cfgS = await readJSON(env, 'BotConfig', {}) || {}
+    const mode = (cfgS && cfgS.backupMode) || 'daily'
+    let cap = '*🕐 JADWAL AUTO-BACKUP*\n'
+    cap += 'Saat ini: *' + (mode === '30m' ? '⏱ Tiap 30 menit' : '📅 Harian') + '*\n\n'
+    cap += '_File dikirim ke owner + channel backup._'
+    const kb = { inline_keyboard: [
+      [{ text: (mode === '30m' ? '✅ ' : '') + '⏱ Tiap 30 menit', callback_data: 'adm_backup_sched_30m' }],
+      [{ text: (mode !== '30m' ? '✅ ' : '') + '📅 Harian', callback_data: 'adm_backup_sched_daily' }],
+      [{ text: '🔙 Kembali', callback_data: 'adm_setfolder_db' }]
+    ] }
+    await tgEditMessageText(env, chatId, messageId, cap, kb, 'Markdown')
+    return
+  }
+  if (data === 'adm_backup_sched_30m' || data === 'adm_backup_sched_daily') {
+    const cfgS = await readJSON(env, 'BotConfig', {}) || {}
+    cfgS.backupMode = data === 'adm_backup_sched_30m' ? '30m' : 'daily'
+    await writeJSON(env, 'BotConfig', cfgS)
+    try { await initConfig(env) } catch {}
+    await tgAnswerCallbackQuery(env, cqId, '✅ ' + (cfgS.backupMode === '30m' ? 'Tiap 30 menit' : 'Harian'))
+    {
+      const mode2 = cfgS.backupMode || 'daily'
+      let cap2 = '*🕐 JADWAL AUTO-BACKUP*\n'
+      cap2 += 'Saat ini: *' + (mode2 === '30m' ? '⏱ Tiap 30 menit' : '📅 Harian') + '*\n\n'
+      cap2 += '_File dikirim ke owner + channel backup._'
+      const kb2 = { inline_keyboard: [
+        [{ text: (mode2 === '30m' ? '✅ ' : '') + '⏱ Tiap 30 menit', callback_data: 'adm_backup_sched_30m' }],
+        [{ text: (mode2 !== '30m' ? '✅ ' : '') + '📅 Harian', callback_data: 'adm_backup_sched_daily' }],
+        [{ text: '🔙 Kembali', callback_data: 'adm_setfolder_db' }]
+      ] }
+      await tgEditMessageText(env, chatId, messageId, cap2, kb2, 'Markdown')
+    }
+    return
+  }
   if (data === 'adm_backup_db') {
     try {
       const keys = ['Kategori', 'Produk', 'SnK', 'Trx', 'UserList', 'Role', 'BannedUser', 'Voucher', 'VoucherBatch', 'VoucherAudit', 'OrderCounter', 'BotConfig', 'StokKeluar', 'StokBaru', 'FlashSale', 'FlashSaleHistory', 'Tickets', 'SessionDeposit']
@@ -5038,7 +5072,12 @@ async function showDbMenu(env, chatId, messageId) {
   cap += 'Token     : ' + tokTxt + (info.credSource ? ' (' + info.credSource + ')' : '') + '\n'
   if (info.dbError) cap += '⚠️ _' + String(info.dbError).slice(0, 90) + '_\n'
   cap += '\n_Pilih backend, lalu migrasi agar data ikut pindah._'
+  const bMode = (cfg && cfg.backupMode) || 'daily'
+  const bJam = (cfg && cfg.JamBackup !== undefined && cfg.JamBackup !== null && cfg.JamBackup !== '') ? cfg.JamBackup : 6
+  const bModeTxt = bMode === '30m' ? '⏱ Tiap 30 menit' : ('📅 Harian @' + bJam + ':00 WIB')
+  cap += '\n\n🕐 _Auto-backup: ' + bModeTxt + '_'
   const kb = { inline_keyboard: [
+    [{ text: '🕐 Jadwal Backup: ' + bModeTxt, callback_data: 'adm_backup_sched' }],
     [{ text: (!isTurso ? '✅ ' : '') + '💾 Lokal/KV', callback_data: 'adm_db_mode_kv' },
      { text: (isTurso ? '✅ ' : '') + '🗄️ Turso', callback_data: 'adm_db_mode_turso' }],
     [{ text: '🔗 Set URL', callback_data: 'adm_db_url' }, { text: '🔑 Set Token', callback_data: 'adm_db_token' }],

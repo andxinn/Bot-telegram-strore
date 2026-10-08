@@ -241,15 +241,16 @@ export default {
       ctx.waitUntil((async () => { try { const { flushTopicDelete } = await import('./ticket.js'); await flushTopicDelete(env) } catch (e) { console.error('[cron topicdel]', e.message) } })())
       ctx.waitUntil((async () => { try { const { flushBcStates } = await import('./admin.js'); await flushBcStates(env) } catch (e) { console.error('[cron bc]', e.message) } })())
       ctx.waitUntil(flushStokBaruNotif(env).catch(e => console.error('[cron stoknotif]', e.message)))
-    } else if (event.cron === '0 * * * *' || event.cron === 'backup30m') {
+    } else if (event.cron === '0 * * * *' || event.cron === 'backup30m' || event.cron === '*/30 * * * *') {
       const wibHour = (new Date().getUTCHours() + 7) % 24
       const _bc = await readJSON(env, 'BotConfig', {}).catch(() => ({}))
       const mode = (_bc && _bc.backupMode) || 'daily'
-      // backup30m (tiap 30 mnt): hanya jalan bila mode 30m. harian: hanya di jam JamBackup.
-      if (event.cron === 'backup30m' && mode !== '30m') return
+      // backup30m / */30 (tiap 30 mnt): hanya jalan bila mode 30m. harian: hanya di jam JamBackup.
+      const is30mTick = event.cron === 'backup30m' || event.cron === '*/30 * * * *'
+      if (is30mTick && mode !== '30m') return
       const wantHour = Number((_bc && _bc.JamBackup) ?? JamBackup ?? env.JAM_BACKUP ?? 6)
       if (mode !== '30m' && wibHour === wantHour) ctx.waitUntil(autoBackup(env))
-      if (mode === '30m' && event.cron === 'backup30m') ctx.waitUntil(autoBackup(env))
+      if (mode === '30m' && is30mTick) ctx.waitUntil(autoBackup(env))
       ctx.waitUntil(cleanupClosedTickets(env))
     }
   }

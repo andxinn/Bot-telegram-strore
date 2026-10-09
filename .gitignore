@@ -25,3 +25,7 @@ backup/
 
 # Dev polling offset (lokal, jangan commit)
 dev-offset.json
+
+# Local editor & tooling
+.freebuff/
+.vscode/

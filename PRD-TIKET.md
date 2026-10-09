@@ -1,9 +1,9 @@
-# PRD — Sistem Tiket Bantuan v9.19 (P1–P10)
+# PRD — Sistem Tiket Bantuan v9.19 (P1–P10) + Parity Q1–Q5
 
-> Status: **LIVE — ter-commit + ter-push `main`, terverifikasi di dev-server.**
-> Versi: **9.19.0** · Repo: `Bot-telegram-strore` (`cf-worker-v9update18-flashsale/`)
-> Cakupan: samakan tampilan + fitur tiket bot STB v1.1 ke bot Cloudflare.
-> Live: `@vlesscfbotgratisbot` (dev-server port 8787, long-polling).
+> Status: **LIVE production — `@tokopremkubot` via Cloudflare Worker `telegram-store-bot`.**
+> Versi: **9.20.0** · Repo: `andxinn/Bot-telegram-strore` (`cf-worker-v9update18-flashsale/`)
+> Cakupan: samakan tampilan + fitur tiket bot STB v1.1 ke bot Cloudflare (+ parity non-tiket Q1–Q5, lihat `CHANGELOG_v9update20.md`).
+> Live: `@tokopremkubot` (Worker `https://telegram-store-bot.manulsinul99.workers.dev`, webhook `/webhook`, cron tunggal `* * * * *`).
 
 ## 1. Ringkasan
 
@@ -95,5 +95,5 @@ Admin (`src/admin.js`): `tk_adm_view_<id>`, `tk_adm_reply_<id>`,
 
 - `node --check src/*.js` — semua OK.
 - Render smoke: `renderTicketCard` role user/admin/closed + `renderUserTicketList` OK.
-- Live dev-server: polling true, KV 35 keys, 2 tiket nyata, log `adm_ticket_keep`.
+- Live production: webhook aktif pending 0, KV remote (`BotConfig`, `UserList`), banner Start foto file_id tersimpan.
 - Sisa manual: 1 skenario HP penuh (buat → balas → tutup → 10mnt hilang → reopen ≤7hr).

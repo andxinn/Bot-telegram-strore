@@ -43,3 +43,10 @@ KV `DB`, Turso opsional (DB_MODE auto), cron 1x `* * * * *` (Free plan).
   (Free plan: maks 5 cron/akun; backup/cleanup di-gate di tick menit).
 - Secrets live: BOT_TOKEN, OWNER_ID, TURSO_URL, TURSO_TOKEN (+ DEV_TOKEN, WEBHOOK_SECRET lama).
 - Webhook: `https://telegram-store-bot.manulsinul99.workers.dev/webhook` aktif, pending 0.
+
+## Tambahan pasca-rilis (`7c196ce`)
+
+- Panel Media & Banner disamakan STB: hapus label `(Base64)` di 4 tombol banner, samakan prompt FS/harga.
+- Banner Start production terisi via foto langsung (file_id, bukan base64) — `/start` tampil foto.
+- Secrets live final: BOT_TOKEN, OWNER_ID, TURSO_URL, TURSO_TOKEN, WEBHOOK_SECRET (DEV_TOKEN lama dihapus).
+- Catatan: `wrangler kv key list` tanpa `--remote` baca KV preview lokal (kosong) — selalu pakai `--remote` untuk data production.

@@ -43,8 +43,8 @@ npm run dev
 # Deploy ke CF Workers
 wrangler deploy
 
-# Setup webhook (jalankan sekali setelah deploy)
-curl https://your-worker.workers.dev/setup
+# Setup webhook (sekali setelah deploy; butuh ?secret= — lihat CLOUDFLARE-SETUP.md §6)
+curl "https://your-worker.workers.dev/setup?secret=ISI_WEBHOOK_SECRET"
 ```
 
 ## Env Variables (.dev.vars / wrangler secret)
@@ -88,7 +88,7 @@ curl https://your-worker.workers.dev/setup
   10mnt, menu 1 pintu, notif ke topik + mention (DM admin mati)
 - Roles: owner, admin, promoter
 - Ban/unban user
-- Auto backup setiap jam
+- Auto backup Harian/30mnt (disetel via panel admin)
 - /manager panel interaktif
 Versi: **9.20.0** (tiket P1-P10 + parity Q1-Q5) — lihat `PRD-TIKET.md` + `CHANGELOG_v9update19.md` + `CHANGELOG_v9update20.md`.
 # Bot-telegram-strore

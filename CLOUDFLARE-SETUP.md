@@ -95,9 +95,9 @@ binding = "DB"
 id = "ISI-ID-DARI-LANGKAH-3"
 
 [triggers]
-crons = ["* * * * *", "0 * * * *"]
-# menit-1: cek pembayaran pending (src/payments.js → checkPendingPayments)
-# jam-1 : auto-backup + bersih tiket closed (src/backup.js)
+crons = ["* * * * *"]   # TUNGGAL (Free plan: maks 5 cron per AKUN)
+# tick menit-1 → src/index.js putuskan di dalam: SLA tiket + sweeper topik +
+# lanjutkan broadcast (flushBcStates) + cek bayar + backup (gate jam/mode) + cleanup.
 ```
 
 Aturan secret vs vars (JANGAN tertukar):
@@ -120,7 +120,7 @@ wrangler secret put OWNER_ID
 
 Opsional (bisa juga diisi belakangan via panel admin bot):
 ```bash
-wrangler secret put WEBHOOK_SECRET   # random string, untuk validasi webhook Telegram
+wrangler secret put WEBHOOK_SECRET   # string random WAJIB (guard webhook tolak request tanpa secret)
 wrangler secret put TURSO_URL       # kalau pakai mode Turso
 wrangler secret put TURSO_TOKEN
 ```
@@ -143,14 +143,16 @@ Dapat URL misal:
 https://telegram-store-bot.<akun-kamu>.workers.dev
 ```
 
-Langsung pasang webhook Telegram (sekali setelah deploy pertama):
+Langsung pasang webhook Telegram (sekali setelah deploy pertama).
+`/setup` butuh `?secret=` = isi WEBHOOK_SECRET (tanpa ini → `Forbidden`):
+
 ```bash
-curl https://telegram-store-bot.<akun-kamu>.workers.dev/setup
-# harap: {"ok":true, ...}
+curl "https://telegram-store-bot.<akun-kamu>.workers.dev/setup?secret=ISI_WEBHOOK_SECRET"
+# harap: {"telegram": {"ok":true,...}, ...}
 ```
 
 Verifikasi:
-1. `curl https://telegram-store-bot.<akun-kamu>.workers.dev/health` → harus OK.
+1. `curl "https://telegram-store-bot.<akun-kamu>.workers.dev/health?secret=ISI_WEBHOOK_SECRET"` → `{"ok":true,...}`.
 2. Buka bot di Telegram → `/start` → bot balas.
 3. Live log bila error:
    ```bash
@@ -176,7 +178,7 @@ Update berikutnya cukup `npx wrangler deploy` — webhook TIDAK perlu di-set ula
 2. Isi misal `bot.tokomu.id` → Activate. Cloudflare otomatis buatkan record DNS + sertifikat (±2 menit).
 3. Set ulang webhook ke domain baru (WAJIB, karena URL berubah):
    ```bash
-   curl https://bot.tokomu.id/setup
+   curl "https://bot.tokomu.id/setup?secret=ISI_WEBHOOK_SECRET"
    ```
 4. Update juga di dashboard gateway:
    - Pakasir → Webhook URL: `https://bot.tokomu.id/pakasir-webhook`
@@ -191,7 +193,8 @@ Buka `https://bot.tokomu.id/health` di browser → harus gembok hijau, tanpa war
 ## 8. Cron & KV — cek sudah jalan
 
 Dashboard → **Workers & Pages → telegram-store-bot**:
-- **Triggers → Cron Triggers** harus ada 2: `* * * * *` dan `0 * * * *`. Kalau kosong → kamu deploy dari folder yang salah; redeploy dari root repo (tempat `wrangler.toml` berada).
+- **Triggers → Cron Triggers** harus ada 1: `* * * * *`. Kalau kosong → kamu deploy dari folder yang salah; redeploy dari root repo (tempat `wrangler.toml` berada).
+  Jangan tambah trigger (Free plan maks 5 per akun; backup/cleanup/SLA/BC sudah di-gate di tick menit).
 - **Bindings → KV** harus ada `DB` dengan ID yang sama seperti di `wrangler.toml`.
 - **Logs → Live** atau `wrangler tail` untuk lihat cron tiap menit (`checkPendingPayments`) tanpa error.
 
@@ -216,7 +219,8 @@ Detail penuh ada di `setupbot.md` bagian 10. Ringkasnya:
 | Gejala | Penyebab | Fix |
 |---|---|---|
 | `KV namespace not found` saat deploy | `id` di `wrangler.toml` masih `your-kv-namespace-id` | Langkah 3: create KV lalu paste id |
-| Bot tidak balas setelah deploy | Webhook belum dipasang | `curl .../setup` (langkah 6) |
+| Bot tidak balas setelah deploy | Webhook belum dipasang / secret salah | `curl .../setup?secret=...` (langkah 6); `secret_token` Telegram harus = WEBHOOK_SECRET worker |
+| `/setup` → `Forbidden` | `?secret=` salah / WEBHOOK_SECRET belum di-set | `wrangler secret put WEBHOOK_SECRET` → deploy ulang → `/setup?secret=` lagi |
 | Bot balas 2× | Token dipakai 2 instance (dev + production jalan bareng) | Matikan `npm run dev`, pakai bot/token dev terpisah |
 | `BOT_TOKEN not set` di `/setup` | Secret belum di-set | `wrangler secret put BOT_TOKEN` lalu deploy ulang |
 | Cron tidak jalan | Trigger hilang / deploy dari folder salah | Redeploy dari root repo, cek tab Triggers |
@@ -229,6 +233,7 @@ Cheatsheet harian:
 npx wrangler deploy      # update production
 wrangler tail            # log live
 wrangler secret list     # cek secrets
-curl https://<worker>/health   # cek hidup
-curl https://<worker>/setup    # pasang ulang webhook
+wrangler kv key list --namespace-id <ID> --remote   # data production (tanpa --remote = preview lokal!)
+curl "https://<worker>/health?secret=..."   # cek hidup
+curl "https://<worker>/setup?secret=..."    # pasang ulang webhook
 ```

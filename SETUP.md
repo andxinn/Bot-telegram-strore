@@ -45,7 +45,9 @@ Di `.dev.vars`: `SIMULATE_PAYMENT=true`, restart. Semua payment langsung sukses.
 npx wrangler kv:namespace create DB   # paste id ke wrangler.toml
 wrangler secret put BOT_TOKEN         # token bot PRODUCTION (beda dari dev!)
 wrangler secret put OWNER_ID
+wrangler secret put WEBHOOK_SECRET    # string random (wajib SEBELUM pasang webhook)
 npx wrangler deploy
+curl "https://<worker-kamu>.workers.dev/setup?secret=ISI_WEBHOOK_SECRET"  # pasang webhook sekali
 ```
 
 Non-sensitif (`NAMA_BOT`, `STORE_NAME`) boleh di `[vars]` wrangler.toml.
